@@ -328,6 +328,64 @@
     color:var(--muted);
     font-size:.78rem;
   }
+
+  /* --- sync Supermoney --- */
+  .sync-row{
+    display:flex;
+    align-items:center;
+    gap:.75rem;
+    flex-wrap:wrap;
+    margin-top:.9rem;
+    padding-top:.9rem;
+    border-top:1px solid var(--line);
+  }
+  .sync-hint{font-size:.78rem; color:var(--muted);}
+  button.sync-btn{
+    background:var(--paper-raised);
+    color:var(--ink);
+    border:1px solid var(--line);
+    padding:.55rem 1rem;
+    border-radius:7px;
+    font-weight:500;
+    font-size:.85rem;
+    cursor:pointer;
+    font-family:inherit;
+    display:inline-flex;
+    align-items:center;
+    gap:.4rem;
+  }
+  button.sync-btn:hover{border-color:var(--accent); color:var(--accent);}
+  button.sync-btn:disabled{opacity:.5; cursor:not-allowed;}
+  #sync-panel{margin-top:.9rem; font-size:.85rem;}
+  .sync-summary{display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:.75rem;}
+  .sync-kpi{
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:.35rem .65rem;
+    min-width:4.5rem;
+  }
+  .sk-label{color:var(--muted); font-size:.68rem; text-transform:uppercase; letter-spacing:.05em; font-weight:600;}
+  .sk-val{font-family:"IBM Plex Mono",monospace; font-size:1rem; font-weight:600;}
+  .sync-kpi.ok .sk-val{color:var(--good);}
+  .sync-kpi.ko .sk-val{color:var(--bad);}
+  .sync-kpi.prog .sk-val{color:var(--series-weighted);}
+  .sync-section-label{
+    font-size:.68rem; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--muted); font-weight:600; margin:.75rem 0 .35rem; display:block;
+  }
+  .sync-tbl{width:100%; border-collapse:collapse; font-size:.8rem;}
+  .sync-tbl th{
+    font-size:.65rem; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--muted); font-weight:600; text-align:left;
+    padding:.28rem .45rem; border-bottom:1px solid var(--line);
+  }
+  .sync-tbl th.r, .sync-tbl td.r{text-align:right;}
+  .sync-tbl td{padding:.28rem .45rem; border-bottom:1px solid var(--line);}
+  .sync-tbl tr:last-child td{border-bottom:none;}
+  .sync-tbl td.n{font-family:"IBM Plex Mono",monospace;}
+  .sync-tbl td.ok-c{color:var(--good);}
+  .sync-tbl td.ko-c{color:var(--bad);}
 </style>
 </head>
 <body>
@@ -360,6 +418,14 @@
         <button type="button" class="ghost" id="cancel-edit-btn" style="display:none;">Annulla modifica</button>
       </form>
       <div class="form-msg" id="form-msg"></div>
+      <div class="sync-row">
+        <button type="button" class="sync-btn" id="sync-btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          Sincronizza da Supermoney
+        </button>
+        <span class="sync-hint">Recupera il dato per la data selezionata nel form</span>
+      </div>
+      <div id="sync-panel"></div>
     </div>
   </section>
 
@@ -803,6 +869,100 @@
   });
 
   render();
+
+  // ---------- sync Supermoney ----------
+
+  var SYNC_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
+
+  function pct(n, d){ return d ? (n / d * 100).toFixed(1) + "%" : "—"; }
+
+  function renderSyncPanel(data){
+    var t = data.totals;
+    var html = '<div class="sync-summary">' +
+      '<div class="sync-kpi"><div class="sk-label">Totale</div><div class="sk-val">' + t.total + '</div></div>' +
+      '<div class="sync-kpi ok"><div class="sk-label">Attivati (OK)</div><div class="sk-val">' + t.ok + '</div></div>' +
+      '<div class="sync-kpi prog"><div class="sk-label">In lavorazione</div><div class="sk-val">' + t.progress + '</div></div>' +
+      '<div class="sync-kpi ko"><div class="sk-label">KO</div><div class="sk-val">' + t.ko + '</div></div>' +
+      '</div>';
+
+    var fornitori = Object.keys(data.byFornitore).sort(function(a,b){
+      return data.byFornitore[b].total - data.byFornitore[a].total;
+    });
+    if(fornitori.length){
+      html += '<span class="sync-section-label">Per gestore</span>';
+      html += '<table class="sync-tbl"><thead><tr><th>Gestore</th><th class="r">Tot</th><th class="r">OK</th><th class="r">Progress</th><th class="r">KO</th><th class="r">% OK</th></tr></thead><tbody>';
+      fornitori.forEach(function(f){
+        var r = data.byFornitore[f];
+        html += '<tr><td>' + escapeHtml(f) + '</td>' +
+          '<td class="n r">' + r.total + '</td>' +
+          '<td class="n r ok-c">' + r.ok + '</td>' +
+          '<td class="n r">' + r.progress + '</td>' +
+          '<td class="n r ko-c">' + r.ko + '</td>' +
+          '<td class="n r">' + pct(r.ok, r.total) + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    var tipi = Object.keys(data.byTipoFornitura).sort(function(a,b){
+      return data.byTipoFornitura[b].total - data.byTipoFornitura[a].total;
+    });
+    if(tipi.length){
+      html += '<span class="sync-section-label">Per tipo fornitura</span>';
+      html += '<table class="sync-tbl"><thead><tr><th>Tipo</th><th class="r">Tot</th><th class="r">OK</th><th class="r">Progress</th><th class="r">KO</th></tr></thead><tbody>';
+      tipi.forEach(function(tf){
+        var r = data.byTipoFornitura[tf];
+        html += '<tr><td>' + escapeHtml(tf) + '</td>' +
+          '<td class="n r">' + r.total + '</td>' +
+          '<td class="n r ok-c">' + r.ok + '</td>' +
+          '<td class="n r">' + r.progress + '</td>' +
+          '<td class="n r ko-c">' + r.ko + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    var panel = document.getElementById("sync-panel");
+    panel.innerHTML = html;
+  }
+
+  document.getElementById("sync-btn").addEventListener("click", function(){
+    var btn = document.getElementById("sync-btn");
+    var panel = document.getElementById("sync-panel");
+    var dateVal = document.getElementById("date-input").value || todayISO();
+
+    btn.disabled = true;
+    btn.textContent = "Sincronizzazione…";
+    panel.innerHTML = "";
+    showMsg("");
+
+    fetch("/.netlify/functions/get-produzione?date=" + dateVal)
+      .then(function(res){ return res.json().then(function(d){ return { ok: res.ok, data: d }; }); })
+      .then(function(r){
+        if(!r.ok){
+          showMsg((r.data && r.data.error) || "Errore Supermoney.", true);
+          return;
+        }
+        if(r.data.totals.total === 0){
+          showMsg("Nessun contratto trovato su Supermoney per il " + dateVal + ".", false);
+          return;
+        }
+        document.getElementById("value-input").value = r.data.value;
+        showMsg(
+          "Dati Supermoney per il " + dateVal + ": " + r.data.totals.total + " contratti totali " +
+          "(OK: " + r.data.totals.ok + ", progress: " + r.data.totals.progress + ", KO: " + r.data.totals.ko + "). " +
+          "Verifica il valore e premi Aggiungi per salvare.",
+          false
+        );
+        renderSyncPanel(r.data);
+      })
+      .catch(function(err){
+        showMsg("Impossibile contattare Supermoney: " + err.message, true);
+      })
+      .finally(function(){
+        btn.disabled = false;
+        btn.innerHTML = SYNC_ICON + " Sincronizza da Supermoney";
+      });
+  });
+
 })();
 </script>
 </body>
