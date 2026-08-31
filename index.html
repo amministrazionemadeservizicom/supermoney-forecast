@@ -1,0 +1,809 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Proiezione Produzione</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#f7f3ea;
+    --paper-raised:#fffdf8;
+    --ink:#221c15;
+    --muted:#746a5c;
+    --line:#e3d9c7;
+    --accent:#b1552c;
+    --accent-contrast:#fffaf3;
+    --series-trend:#2f6f6b;
+    --series-weighted:#a8761f;
+    --good:#3f7d52;
+    --bad:#b23b3b;
+    --shadow:rgba(34,28,21,0.10);
+    --radius:10px;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#1a1712;
+      --paper-raised:#221e17;
+      --ink:#f3ede0;
+      --muted:#b3a692;
+      --line:#3a3327;
+      --accent:#d97a46;
+      --accent-contrast:#1a1712;
+      --series-trend:#5aa9a4;
+      --series-weighted:#d6a94a;
+      --good:#6fbf83;
+      --bad:#e07272;
+      --shadow:rgba(0,0,0,0.4);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#1a1712;
+    --paper-raised:#221e17;
+    --ink:#f3ede0;
+    --muted:#b3a692;
+    --line:#3a3327;
+    --accent:#d97a46;
+    --accent-contrast:#1a1712;
+    --series-trend:#5aa9a4;
+    --series-weighted:#d6a94a;
+    --good:#6fbf83;
+    --bad:#e07272;
+    --shadow:rgba(0,0,0,0.4);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{
+    max-width:920px;
+    margin:0 auto;
+    padding:2.5rem 1.5rem 4rem;
+  }
+  header.page{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    gap:1rem;
+    flex-wrap:wrap;
+    margin-bottom:2rem;
+    padding-bottom:1.25rem;
+    border-bottom:1px solid var(--line);
+  }
+  header.page h1{
+    font-size:1.7rem;
+    font-weight:700;
+    margin:0 0 .25rem;
+    letter-spacing:-0.01em;
+    text-wrap:balance;
+  }
+  header.page p{
+    margin:0;
+    color:var(--muted);
+    font-size:.95rem;
+    max-width:46ch;
+  }
+  .unit-field{
+    display:flex;
+    align-items:center;
+    gap:.4rem;
+    font-size:.8rem;
+    color:var(--muted);
+  }
+  .unit-field input{
+    width:5.5rem;
+    padding:.3rem .5rem;
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:var(--paper-raised);
+    color:var(--ink);
+    font-family:inherit;
+    font-size:.85rem;
+  }
+
+  section{margin-bottom:2.25rem;}
+  h2.section-title{
+    font-size:.75rem;
+    text-transform:uppercase;
+    letter-spacing:.09em;
+    color:var(--muted);
+    font-weight:600;
+    margin:0 0 .9rem;
+  }
+
+  .entry-card{
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:1.25rem;
+    box-shadow:0 1px 2px var(--shadow);
+  }
+  .entry-form{
+    display:flex;
+    gap:.75rem;
+    flex-wrap:wrap;
+    align-items:flex-end;
+  }
+  .field{
+    display:flex;
+    flex-direction:column;
+    gap:.3rem;
+  }
+  .field label{
+    font-size:.72rem;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+    color:var(--muted);
+    font-weight:600;
+  }
+  .field input{
+    padding:.55rem .7rem;
+    border:1px solid var(--line);
+    border-radius:7px;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"IBM Plex Mono", monospace;
+    font-size:.95rem;
+    min-width:9rem;
+  }
+  .field input:focus, button:focus-visible{
+    outline:2px solid var(--accent);
+    outline-offset:1px;
+  }
+  button.primary{
+    background:var(--accent);
+    color:var(--accent-contrast);
+    border:none;
+    padding:.6rem 1.2rem;
+    border-radius:7px;
+    font-weight:600;
+    font-size:.9rem;
+    cursor:pointer;
+    font-family:inherit;
+  }
+  button.primary:hover{filter:brightness(1.08);}
+  button.ghost{
+    background:transparent;
+    color:var(--muted);
+    border:1px solid var(--line);
+    padding:.6rem 1rem;
+    border-radius:7px;
+    font-weight:500;
+    font-size:.85rem;
+    cursor:pointer;
+    font-family:inherit;
+  }
+  button.ghost:hover{color:var(--ink); border-color:var(--ink);}
+  .form-msg{
+    font-size:.82rem;
+    color:var(--muted);
+    margin-top:.6rem;
+  }
+  .form-msg.error{color:var(--bad);}
+
+  .stat-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(230px, 1fr));
+    gap:1rem;
+  }
+  .stat-card{
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:1.1rem 1.2rem;
+    box-shadow:0 1px 2px var(--shadow);
+  }
+  .stat-card .label{
+    font-size:.72rem;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+    color:var(--muted);
+    font-weight:600;
+    display:flex;
+    align-items:center;
+    gap:.4rem;
+  }
+  .stat-card .swatch{
+    width:.6rem;height:.6rem;border-radius:50%;flex:none;
+  }
+  .stat-card .value{
+    font-family:"IBM Plex Mono", monospace;
+    font-size:1.9rem;
+    font-weight:600;
+    margin:.35rem 0 .2rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-card .value .unit{
+    font-size:1rem;
+    font-weight:500;
+    color:var(--muted);
+    margin-left:.3rem;
+  }
+  .stat-card .note{
+    font-size:.8rem;
+    color:var(--muted);
+  }
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    gap:.3rem;
+    font-size:.72rem;
+    font-weight:600;
+    padding:.15rem .5rem;
+    border-radius:999px;
+    margin-top:.5rem;
+  }
+  .pill.up{background:color-mix(in srgb, var(--good) 18%, transparent); color:var(--good);}
+  .pill.down{background:color-mix(in srgb, var(--bad) 18%, transparent); color:var(--bad);}
+  .pill.flat{background:color-mix(in srgb, var(--muted) 18%, transparent); color:var(--muted);}
+
+  .chart-card{
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:1.25rem;
+    box-shadow:0 1px 2px var(--shadow);
+  }
+  .chart-card svg{width:100%; height:auto; display:block; overflow:visible;}
+  .legend{
+    display:flex;
+    flex-wrap:wrap;
+    gap:1.1rem;
+    margin-top:.9rem;
+    padding-top:.9rem;
+    border-top:1px solid var(--line);
+  }
+  .legend-item{
+    display:flex;
+    align-items:center;
+    gap:.4rem;
+    font-size:.78rem;
+    color:var(--muted);
+  }
+  .legend-swatch{width:1.1rem;height:.15rem;border-radius:2px;flex:none;}
+  .legend-dot{width:.55rem;height:.55rem;border-radius:50%;flex:none;}
+
+  table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:.9rem;
+  }
+  .table-wrap{
+    overflow-x:auto;
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    box-shadow:0 1px 2px var(--shadow);
+  }
+  th,td{
+    text-align:left;
+    padding:.65rem .9rem;
+    border-bottom:1px solid var(--line);
+    white-space:nowrap;
+  }
+  th{
+    font-size:.72rem;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+    color:var(--muted);
+    font-weight:600;
+  }
+  td.num{font-family:"IBM Plex Mono", monospace; font-variant-numeric: tabular-nums;}
+  tr:last-child td{border-bottom:none;}
+  td.actions{display:flex; gap:.4rem; white-space:nowrap;}
+  td.actions button{
+    background:none;
+    border:none;
+    color:var(--muted);
+    cursor:pointer;
+    font-size:.8rem;
+    padding:.2rem .4rem;
+    font-family:inherit;
+    text-decoration:underline;
+  }
+  td.actions button:hover{color:var(--accent);}
+  .empty-state{
+    padding:2rem 1.25rem;
+    text-align:center;
+    color:var(--muted);
+    font-size:.9rem;
+  }
+  .table-foot{
+    display:flex;
+    justify-content:flex-end;
+    padding:.75rem .9rem;
+  }
+  footer.page{
+    margin-top:2.5rem;
+    padding-top:1.25rem;
+    border-top:1px solid var(--line);
+    color:var(--muted);
+    font-size:.78rem;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <div>
+      <h1>Proiezione Produzione</h1>
+      <p>Inserisci il dato di produzione di oggi e confronta subito tre metodi di previsione per il giorno successivo.</p>
+    </div>
+    <div class="unit-field">
+      <label for="unit-input">Unità di misura</label>
+      <input type="text" id="unit-input" maxlength="12" value="unità">
+    </div>
+  </header>
+
+  <section>
+    <h2 class="section-title">Inserisci dato giornaliero</h2>
+    <div class="entry-card">
+      <form class="entry-form" id="entry-form" autocomplete="off">
+        <div class="field">
+          <label for="date-input">Data</label>
+          <input type="date" id="date-input" required>
+        </div>
+        <div class="field">
+          <label for="value-input">Produzione</label>
+          <input type="number" id="value-input" inputmode="decimal" step="any" min="0" placeholder="es. 1250" required>
+        </div>
+        <button type="submit" class="primary" id="submit-btn">Aggiungi</button>
+        <button type="button" class="ghost" id="cancel-edit-btn" style="display:none;">Annulla modifica</button>
+      </form>
+      <div class="form-msg" id="form-msg"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section-title">Proiezione per il prossimo giorno</h2>
+    <div class="stat-grid" id="stat-grid"></div>
+  </section>
+
+  <section>
+    <h2 class="section-title">Andamento storico</h2>
+    <div class="chart-card">
+      <div id="chart-container"></div>
+      <div class="legend" id="chart-legend"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section-title">Storico inserimenti</h2>
+    <div class="table-wrap" id="table-wrap"></div>
+  </section>
+
+  <footer class="page">
+    I dati sono salvati nel browser di questo dispositivo (local storage) — non sincronizzati automaticamente su altri dispositivi.
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var STORAGE_KEY = "produzione-forecast-v1";
+
+  function todayISO(){
+    var d = new Date();
+    var tz = d.getTimezoneOffset() * 60000;
+    return new Date(d - tz).toISOString().slice(0,10);
+  }
+
+  function loadState(){
+    try{
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if(!raw) return { entries: [], unit: "unità" };
+      var parsed = JSON.parse(raw);
+      if(!parsed || !Array.isArray(parsed.entries)) return { entries: [], unit: "unità" };
+      if(typeof parsed.unit !== "string" || !parsed.unit) parsed.unit = "unità";
+      return parsed;
+    }catch(e){
+      return { entries: [], unit: "unità" };
+    }
+  }
+
+  function saveState(state){
+    try{
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }catch(e){
+      showMsg("Impossibile salvare: local storage non disponibile in questo browser.", true);
+    }
+  }
+
+  var state = loadState();
+  var editingDate = null;
+
+  // ---------- math ----------
+
+  function sortedEntries(){
+    return state.entries.slice().sort(function(a,b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+  }
+
+  function simpleAverage(vals){
+    if(vals.length === 0) return null;
+    var sum = 0;
+    for(var i=0;i<vals.length;i++) sum += vals[i];
+    return sum / vals.length;
+  }
+
+  function linearTrend(vals){
+    var n = vals.length;
+    if(n < 2) return null;
+    var sumX=0,sumY=0,sumXY=0,sumXX=0;
+    for(var i=0;i<n;i++){
+      sumX += i;
+      sumY += vals[i];
+      sumXY += i*vals[i];
+      sumXX += i*i;
+    }
+    var denom = (n*sumXX - sumX*sumX);
+    if(denom === 0) return null;
+    var slope = (n*sumXY - sumX*sumY) / denom;
+    var intercept = (sumY - slope*sumX) / n;
+    var projection = slope*n + intercept;
+    return { slope: slope, intercept: intercept, projection: projection };
+  }
+
+  function weightedRecent(vals){
+    var n = vals.length;
+    if(n === 0) return null;
+    var last3 = vals.slice(Math.max(0, n-3));
+    var weights = last3.length === 1 ? [1] : last3.length === 2 ? [1,2] : [1,2,3];
+    var sum=0, wsum=0;
+    for(var i=0;i<last3.length;i++){ sum += last3[i]*weights[i]; wsum += weights[i]; }
+    return sum/wsum;
+  }
+
+  function clip0(v){ return v === null ? null : Math.max(0, v); }
+
+  // ---------- formatting ----------
+
+  function fmtNum(v, digits){
+    if(v === null || v === undefined || isNaN(v)) return "—";
+    return v.toLocaleString("it-IT", { minimumFractionDigits: 0, maximumFractionDigits: digits === undefined ? 1 : digits });
+  }
+
+  function fmtDateLabel(iso){
+    var d = new Date(iso + "T00:00:00");
+    return d.toLocaleDateString("it-IT", { day:"2-digit", month:"short" });
+  }
+
+  function nextDayISO(iso){
+    var d = new Date(iso + "T00:00:00");
+    d.setDate(d.getDate()+1);
+    var tz = d.getTimezoneOffset() * 60000;
+    return new Date(d - tz).toISOString().slice(0,10);
+  }
+
+  // ---------- rendering ----------
+
+  function showMsg(text, isError){
+    var el = document.getElementById("form-msg");
+    el.textContent = text || "";
+    el.className = "form-msg" + (isError ? " error" : "");
+  }
+
+  function render(){
+    var entries = sortedEntries();
+    var vals = entries.map(function(e){ return e.value; });
+    var unit = state.unit || "unità";
+
+    renderStats(entries, vals, unit);
+    renderChart(entries, vals, unit);
+    renderTable(entries, unit);
+  }
+
+  function renderStats(entries, vals, unit){
+    var grid = document.getElementById("stat-grid");
+    grid.innerHTML = "";
+
+    var avg = clip0(simpleAverage(vals));
+    var trend = linearTrend(vals);
+    var trendProj = trend ? clip0(trend.projection) : null;
+    var weighted = clip0(weightedRecent(vals));
+
+    grid.appendChild(statCard({
+      color: "var(--accent)",
+      label: "Media semplice",
+      value: avg,
+      unit: unit,
+      note: entries.length ? "Media di " + entries.length + " giorni inseriti." : "Aggiungi almeno un dato per calcolarla.",
+      pill: null
+    }));
+
+    var trendNote;
+    var pill = null;
+    if(!trend){
+      trendNote = "Servono almeno 2 giorni di dati per calcolare il trend.";
+    } else {
+      var perDay = trend.slope;
+      if(Math.abs(perDay) < (avg || 1) * 0.005){
+        trendNote = "Andamento stabile, variazione trascurabile al giorno.";
+        pill = { cls:"flat", text:"➝ stabile" };
+      } else if(perDay > 0){
+        trendNote = "In crescita di circa " + fmtNum(Math.abs(perDay)) + " " + unit + "/giorno.";
+        pill = { cls:"up", text:"▲ in crescita" };
+      } else {
+        trendNote = "In calo di circa " + fmtNum(Math.abs(perDay)) + " " + unit + "/giorno.";
+        pill = { cls:"down", text:"▼ in calo" };
+      }
+    }
+    grid.appendChild(statCard({
+      color: "var(--series-trend)",
+      label: "Trend (regressione lineare)",
+      value: trendProj,
+      unit: unit,
+      note: trendNote,
+      pill: pill
+    }));
+
+    grid.appendChild(statCard({
+      color: "var(--series-weighted)",
+      label: "Media ponderata (ultimi 3 gg)",
+      value: weighted,
+      unit: unit,
+      note: entries.length >= 3
+        ? "Pesi 1-2-3: il giorno più recente pesa il triplo del più lontano."
+        : (entries.length === 0 ? "Aggiungi dati per calcolarla." : "Con meno di 3 giorni i pesi si adattano automaticamente."),
+      pill: null
+    }));
+  }
+
+  function statCard(opts){
+    var card = document.createElement("div");
+    card.className = "stat-card";
+
+    var label = document.createElement("div");
+    label.className = "label";
+    var sw = document.createElement("span");
+    sw.className = "swatch";
+    sw.style.background = opts.color;
+    label.appendChild(sw);
+    label.appendChild(document.createTextNode(opts.label));
+    card.appendChild(label);
+
+    var value = document.createElement("div");
+    value.className = "value";
+    value.innerHTML = fmtNum(opts.value) + (opts.value !== null ? '<span class="unit">' + escapeHtml(opts.unit) + '</span>' : "");
+    card.appendChild(value);
+
+    var note = document.createElement("div");
+    note.className = "note";
+    note.textContent = opts.note;
+    card.appendChild(note);
+
+    if(opts.pill){
+      var p = document.createElement("div");
+      p.className = "pill " + opts.pill.cls;
+      p.textContent = opts.pill.text;
+      card.appendChild(p);
+    }
+
+    return card;
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c];
+    });
+  }
+
+  function renderChart(entries, vals, unit){
+    var container = document.getElementById("chart-container");
+    var legend = document.getElementById("chart-legend");
+    legend.innerHTML = "";
+
+    if(entries.length === 0){
+      container.innerHTML = '<div class="empty-state">Nessun dato ancora inserito. Aggiungi il primo valore per vedere il grafico.</div>';
+      return;
+    }
+
+    var avg = clip0(simpleAverage(vals));
+    var trend = linearTrend(vals);
+    var trendProj = trend ? clip0(trend.projection) : null;
+    var weighted = clip0(weightedRecent(vals));
+
+    var W = 760, H = 300;
+    var padL = 54, padR = 20, padT = 20, padB = 40;
+    var chartW = W - padL - padR;
+    var chartH = H - padT - padB;
+
+    var n = entries.length;
+    var slots = n + 1; // + projected day
+    var xStep = slots > 1 ? chartW / (slots - 1) : 0;
+
+    var allVals = vals.slice();
+    if(avg !== null) allVals.push(avg);
+    if(trendProj !== null) allVals.push(trendProj);
+    if(weighted !== null) allVals.push(weighted);
+    var minV = Math.min.apply(null, allVals.concat([0]));
+    var maxV = Math.max.apply(null, allVals);
+    if(maxV === minV) maxV = minV + 1;
+    var pad = (maxV - minV) * 0.12;
+    minV = Math.max(0, minV - pad);
+    maxV = maxV + pad;
+
+    function xAt(i){ return padL + (slots > 1 ? i * xStep : chartW/2); }
+    function yAt(v){ return padT + chartH - ((v - minV) / (maxV - minV)) * chartH; }
+
+    var svg = [];
+    svg.push('<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Grafico andamento produzione e proiezioni">');
+
+    // gridlines
+    var gridLines = 4;
+    for(var g=0; g<=gridLines; g++){
+      var gv = minV + (maxV-minV) * (g/gridLines);
+      var gy = yAt(gv);
+      svg.push('<line x1="'+padL+'" y1="'+gy+'" x2="'+(W-padR)+'" y2="'+gy+'" stroke="var(--line)" stroke-width="1"/>');
+      svg.push('<text x="'+(padL-10)+'" y="'+(gy+4)+'" text-anchor="end" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--muted)">'+fmtNum(gv,0)+'</text>');
+    }
+
+    // simple average reference line (dashed, full width)
+    if(avg !== null){
+      var ay = yAt(avg);
+      svg.push('<line x1="'+padL+'" y1="'+ay+'" x2="'+(W-padR)+'" y2="'+ay+'" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="3 4" opacity="0.75"/>');
+    }
+
+    // actual history line + area
+    var pts = entries.map(function(e,i){ return [xAt(i), yAt(e.value)]; });
+    var linePath = pts.map(function(p,i){ return (i===0?"M":"L") + p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" ");
+    var areaPath = linePath + " L" + pts[pts.length-1][0].toFixed(1) + "," + (padT+chartH) + " L" + pts[0][0].toFixed(1) + "," + (padT+chartH) + " Z";
+    svg.push('<path d="'+areaPath+'" fill="var(--accent)" opacity="0.08" stroke="none"/>');
+    svg.push('<path d="'+linePath+'" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>');
+
+    pts.forEach(function(p,i){
+      var isLast = i === pts.length - 1;
+      svg.push('<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(isLast?4.5:3)+'" fill="var(--paper-raised)" stroke="var(--accent)" stroke-width="2"/>');
+    });
+
+    // trend dashed extension from last actual point to projection
+    if(trend && trendProj !== null){
+      var lastPt = pts[pts.length-1];
+      var projX = xAt(n);
+      var projY = yAt(trendProj);
+      svg.push('<line x1="'+lastPt[0].toFixed(1)+'" y1="'+lastPt[1].toFixed(1)+'" x2="'+projX.toFixed(1)+'" y2="'+projY.toFixed(1)+'" stroke="var(--series-trend)" stroke-width="2" stroke-dasharray="5 4"/>');
+      svg.push('<path d="M'+(projX-5).toFixed(1)+','+projY.toFixed(1)+' L'+projX.toFixed(1)+','+(projY-5).toFixed(1)+' L'+(projX+5).toFixed(1)+','+projY.toFixed(1)+' L'+projX.toFixed(1)+','+(projY+5).toFixed(1)+' Z" fill="var(--series-trend)"/>');
+    }
+
+    // weighted marker at projected day
+    if(weighted !== null){
+      var wx = xAt(n);
+      var wy = yAt(weighted);
+      svg.push('<circle cx="'+wx.toFixed(1)+'" cy="'+wy.toFixed(1)+'" r="5.5" fill="var(--series-weighted)" stroke="var(--paper-raised)" stroke-width="2"/>');
+    }
+
+    // x axis labels (thin out if many entries)
+    var labelEvery = Math.max(1, Math.ceil(n / 8));
+    entries.forEach(function(e,i){
+      if(i % labelEvery === 0 || i === n-1){
+        svg.push('<text x="'+xAt(i).toFixed(1)+'" y="'+(H-14)+'" text-anchor="middle" font-size="10.5" font-family="IBM Plex Sans, sans-serif" fill="var(--muted)">'+fmtDateLabel(e.date)+'</text>');
+      }
+    });
+    svg.push('<text x="'+xAt(n).toFixed(1)+'" y="'+(H-14)+'" text-anchor="middle" font-size="10.5" font-weight="600" font-family="IBM Plex Sans, sans-serif" fill="var(--ink)">domani</text>');
+
+    svg.push('</svg>');
+    container.innerHTML = svg.join("");
+
+    legend.innerHTML =
+      '<span class="legend-item"><span class="legend-swatch" style="background:var(--accent)"></span>Storico</span>' +
+      '<span class="legend-item"><span class="legend-swatch" style="background:var(--accent); opacity:.6; height:0; border-top:2px dashed var(--accent);"></span>Media semplice</span>' +
+      '<span class="legend-item"><span class="legend-swatch" style="background:var(--series-trend); height:0; border-top:2px dashed var(--series-trend);"></span>Trend lineare</span>' +
+      '<span class="legend-item"><span class="legend-dot" style="background:var(--series-weighted)"></span>Media ponderata (3gg)</span>';
+  }
+
+  function renderTable(entries, unit){
+    var wrap = document.getElementById("table-wrap");
+    if(entries.length === 0){
+      wrap.innerHTML = '<div class="empty-state">Nessun inserimento ancora.</div>';
+      return;
+    }
+    var reversed = entries.slice().reverse();
+    var html = '<table><thead><tr><th>Data</th><th>Produzione ('+escapeHtml(unit)+')</th><th></th></tr></thead><tbody>';
+    reversed.forEach(function(e){
+      html += '<tr data-date="'+e.date+'">' +
+        '<td>'+fmtDateLabel(e.date)+' <span style="color:var(--muted); font-size:.78rem;">('+e.date+')</span></td>' +
+        '<td class="num">'+fmtNum(e.value)+'</td>' +
+        '<td class="actions"><button data-action="edit" data-date="'+e.date+'">Modifica</button><button data-action="delete" data-date="'+e.date+'">Elimina</button></td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+
+    wrap.querySelectorAll("button[data-action]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var d = btn.getAttribute("data-date");
+        if(btn.getAttribute("data-action") === "edit"){
+          startEdit(d);
+        } else {
+          if(confirm("Eliminare il dato del " + d + "?")){
+            deleteEntry(d);
+          }
+        }
+      });
+    });
+  }
+
+  // ---------- actions ----------
+
+  function upsertEntry(date, value){
+    var idx = state.entries.findIndex(function(e){ return e.date === date; });
+    if(idx >= 0){
+      state.entries[idx].value = value;
+    } else {
+      state.entries.push({ date: date, value: value });
+    }
+    saveState(state);
+    render();
+  }
+
+  function deleteEntry(date){
+    state.entries = state.entries.filter(function(e){ return e.date !== date; });
+    saveState(state);
+    if(editingDate === date) resetForm();
+    render();
+  }
+
+  function startEdit(date){
+    var e = state.entries.find(function(e){ return e.date === date; });
+    if(!e) return;
+    editingDate = date;
+    document.getElementById("date-input").value = date;
+    document.getElementById("value-input").value = e.value;
+    document.getElementById("submit-btn").textContent = "Salva modifica";
+    document.getElementById("cancel-edit-btn").style.display = "inline-block";
+    showMsg("");
+    document.getElementById("value-input").focus();
+  }
+
+  function resetForm(){
+    editingDate = null;
+    document.getElementById("entry-form").reset();
+    document.getElementById("date-input").value = todayISO();
+    document.getElementById("submit-btn").textContent = "Aggiungi";
+    document.getElementById("cancel-edit-btn").style.display = "none";
+  }
+
+  // ---------- init ----------
+
+  document.getElementById("date-input").value = todayISO();
+  document.getElementById("unit-input").value = state.unit || "unità";
+
+  document.getElementById("entry-form").addEventListener("submit", function(ev){
+    ev.preventDefault();
+    var dateVal = document.getElementById("date-input").value;
+    var numVal = parseFloat(document.getElementById("value-input").value);
+    if(!dateVal){ showMsg("Inserisci una data valida.", true); return; }
+    if(isNaN(numVal) || numVal < 0){ showMsg("Inserisci un valore di produzione valido (>= 0).", true); return; }
+    var wasEditing = !!editingDate;
+    upsertEntry(dateVal, numVal);
+    showMsg(wasEditing ? "Dato del " + dateVal + " aggiornato." : "Dato del " + dateVal + " aggiunto.");
+    resetForm();
+  });
+
+  document.getElementById("cancel-edit-btn").addEventListener("click", function(){
+    resetForm();
+    showMsg("");
+  });
+
+  document.getElementById("unit-input").addEventListener("change", function(){
+    var u = document.getElementById("unit-input").value.trim();
+    state.unit = u || "unità";
+    saveState(state);
+    render();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
