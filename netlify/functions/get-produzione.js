@@ -23,10 +23,10 @@ async function login() {
   return data.token;
 }
 
-async function fetchCSV(token, date) {
+async function fetchCSV(token, from, to) {
   const url =
     `${BASE_URL}/service/consuntivo/csv-tl` +
-    `?tipoProdotto[]=utility&from=${date}&to=${date}&resultsPerPage=2000&page=1&limit=2000`;
+    `?tipoProdotto[]=utility&from=${from}&to=${to}&resultsPerPage=2000&page=1&limit=2000`;
   const res = await fetch(url, {
     headers: {
       Authorization: token,
@@ -151,9 +151,23 @@ exports.handler = async function (event) {
   }
 
   const params = event.queryStringParameters || {};
-  const date = params.date || new Date().toISOString().slice(0, 10);
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  // Calcola la data di riferimento in ora italiana (Europe/Rome)
+  const nowIt = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Rome" }));
+  function isoDate(d) {
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  const todayIt = isoDate(nowIt);
+  const ystIt = isoDate(new Date(nowIt.getFullYear(), nowIt.getMonth(), nowIt.getDate() - 1));
+  // Prima delle 18:00 ora italiana usa ieri (dati più consolidati)
+  const refDay = nowIt.getHours() < 18 ? ystIt : todayIt;
+
+  const defaultFrom = refDay.slice(0, 7) + "-01"; // primo del mese di refDay
+  // Se viene passata una singola "date", usala per entrambi (backward compat)
+  const from = params.from || (params.date ? params.date : defaultFrom);
+  const to   = params.to   || (params.date ? params.date : refDay);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
     return {
       statusCode: 400,
       headers: RESPONSE_HEADERS,
@@ -173,7 +187,7 @@ exports.handler = async function (event) {
 
   try {
     const token = await login();
-    const csvText = await fetchCSV(token, date);
+    const csvText = await fetchCSV(token, from, to);
     const rows = parseCSVRows(csvText);
 
     if (rows.length === 0) {
@@ -181,7 +195,7 @@ exports.handler = async function (event) {
         statusCode: 200,
         headers: RESPONSE_HEADERS,
         body: JSON.stringify({
-          date,
+          from, to,
           value: 0,
           totals: { total: 0, ok: 0, progress: 0, ko: 0 },
           byFornitore: {},
@@ -205,7 +219,7 @@ exports.handler = async function (event) {
       statusCode: 200,
       headers: RESPONSE_HEADERS,
       body: JSON.stringify({
-        date,
+        from, to,
         value: active,
         rid,
         ridPct,

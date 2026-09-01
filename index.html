@@ -391,6 +391,61 @@
     font-size:.82rem; color:var(--muted);
     margin:-.4rem 0 .9rem; line-height:1.5;
   }
+
+  /* --- fattori correzione --- */
+  .factors-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));
+    gap:.75rem;
+    margin-bottom:1rem;
+  }
+  .factor-card{
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:.8rem 1rem;
+  }
+  .factor-card .fc-label{
+    font-size:.75rem; font-weight:600; color:var(--muted);
+    text-transform:uppercase; letter-spacing:.05em;
+    margin-bottom:.4rem;
+  }
+  .factor-card .fc-note{
+    font-size:.73rem; color:var(--muted); margin-top:.3rem;
+    line-height:1.4;
+  }
+  .factor-row{
+    display:flex; align-items:center; gap:.5rem;
+  }
+  .factor-row input[type="number"]{
+    width:5.5rem; font-family:"IBM Plex Mono",monospace;
+    font-size:.95rem; font-weight:600;
+    background:var(--paper); border:1px solid var(--line);
+    border-radius:5px; padding:.3rem .5rem; color:var(--ink);
+    text-align:right;
+  }
+  .factor-row input[type="number"]:focus{
+    outline:none; border-color:var(--accent);
+  }
+  .factor-row .fc-unit{ font-size:.85rem; color:var(--muted); }
+  .factor-total{
+    background:var(--paper-raised); border:1px solid var(--line);
+    border-radius:var(--radius); padding:.6rem 1rem;
+    font-size:.85rem; display:flex; align-items:center; gap:.5rem;
+    flex-wrap:wrap;
+  }
+  .factor-total .ft-label{ color:var(--muted); }
+  .factor-total .ft-val{
+    font-family:"IBM Plex Mono",monospace; font-weight:700;
+    font-size:1rem;
+    color:var(--ink);
+  }
+  .factor-total .ft-val.pos{ color:var(--good); }
+  .factor-total .ft-val.neg{ color:var(--bad); }
+  .factor-adj-row{
+    margin-top:.5rem; font-size:.82rem; color:var(--muted);
+  }
+  .factor-adj-row strong{ color:var(--ink); font-size:.95rem; font-family:"IBM Plex Mono",monospace; }
 </style>
 </head>
 <body>
@@ -399,7 +454,7 @@
   <header class="page">
     <div>
       <h1>Proiezione Produzione</h1>
-      <p>Inserisci il dato di produzione di oggi e confronta subito tre metodi di previsione per il giorno successivo.</p>
+      <p>Dati aggiornati automaticamente da Supermoney · si aggiorna ogni 20 minuti.</p>
     </div>
     <div class="unit-field">
       <label for="unit-input">Unità di misura</label>
@@ -408,29 +463,12 @@
   </header>
 
   <section>
-    <h2 class="section-title">Inserisci dato giornaliero</h2>
     <div class="entry-card">
-      <form class="entry-form" id="entry-form" autocomplete="off">
-        <div class="field">
-          <label for="date-input">Data</label>
-          <input type="date" id="date-input" required>
-        </div>
-        <div class="field">
-          <label for="value-input">Produzione</label>
-          <input type="number" id="value-input" inputmode="decimal" step="any" min="0" placeholder="es. 1250" required>
-        </div>
-        <button type="submit" class="primary" id="submit-btn">Aggiungi</button>
-        <button type="button" class="ghost" id="cancel-edit-btn" style="display:none;">Annulla modifica</button>
-      </form>
       <div class="form-msg" id="form-msg"></div>
       <div class="sync-row">
         <button type="button" class="sync-btn" id="sync-btn">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-          Sincronizza da Supermoney
-        </button>
-        <button type="button" class="sync-btn" id="storico-btn">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><polyline points="12 7 12 12 15 15"/></svg>
-          Carica storico 6 mesi
+          Aggiorna ora
         </button>
         <span class="sync-hint" id="sync-hint">Auto-sync ogni 20 min · ultima: mai</span>
       </div>
@@ -444,6 +482,13 @@
     <div class="stat-grid" id="stat-grid"></div>
   </section>
 
+  <section id="factors-section">
+    <h2 class="section-title">Fattori di correzione</h2>
+    <p class="forecast-context">Aggiungi o togli percentuale alle proiezioni per tenere conto di stagionalità, tariffe mancanti o altri fattori. Le proiezioni qui sopra vengono ricalcolate in tempo reale.</p>
+    <div class="factors-grid" id="factors-grid"></div>
+    <div class="factor-total" id="factor-total"></div>
+  </section>
+
   <section id="provider-section" style="display:none;">
     <h2 class="section-title">Previsione per gestore</h2>
     <div id="provider-breakdown"></div>
@@ -452,19 +497,6 @@
   <section id="monthly-history-section" style="display:none;">
     <h2 class="section-title">Storico mensile</h2>
     <div id="monthly-history"></div>
-  </section>
-
-  <section>
-    <h2 class="section-title">Andamento storico</h2>
-    <div class="chart-card">
-      <div id="chart-container"></div>
-      <div class="legend" id="chart-legend"></div>
-    </div>
-  </section>
-
-  <section>
-    <h2 class="section-title">Storico inserimenti</h2>
-    <div class="table-wrap" id="table-wrap"></div>
   </section>
 
   <footer class="page">
@@ -478,26 +510,77 @@
   "use strict";
 
   var STORAGE_KEY = "produzione-forecast-v1";
-  var pendingSyncData = null; // { date, byFornitore } da ultima sincronizzazione
 
-  function todayISO(){
-    var d = new Date();
-    var tz = d.getTimezoneOffset() * 60000;
-    return new Date(d - tz).toISOString().slice(0,10);
+  // ---------- fattori correzione ----------
+  function defaultFactors(){
+    return [
+      { id:"stagionale", label:"Stagionalità", pct:0, note:"Es. -20 in agosto per ferie, +10 in autunno per rinnovi." },
+      { id:"tariffa",    label:"Tariffa/offerta",  pct:0, note:"Es. -15 se manca una tariffa competitiva sul mercato." },
+      { id:"custom1",   label:"Altro fattore 1",  pct:0, note:"Qualsiasi fattore commerciale o operativo." }
+    ];
+  }
+
+  function totalFactorMultiplier(){
+    var factors = state.factors || [];
+    var sum = factors.reduce(function(s,f){ return s + (parseFloat(f.pct)||0); }, 0);
+    return 1 + sum / 100;
+  }
+
+  function renderFactors(){
+    var grid = document.getElementById("factors-grid");
+    var totalEl = document.getElementById("factor-total");
+    var factors = state.factors || [];
+    grid.innerHTML = "";
+    factors.forEach(function(f, idx){
+      var card = document.createElement("div"); card.className = "factor-card";
+      var lbl = document.createElement("div"); lbl.className = "fc-label"; lbl.textContent = f.label;
+      var row = document.createElement("div"); row.className = "factor-row";
+      var inp = document.createElement("input");
+      inp.type = "number"; inp.step = "1"; inp.min = "-100"; inp.max = "200";
+      inp.value = f.pct; inp.title = "Percentuale di correzione";
+      inp.addEventListener("input", function(){
+        state.factors[idx].pct = parseFloat(inp.value)||0;
+        saveState(state);
+        updateFactorTotal();
+        renderStats(state.unit||"unità");
+        renderProviders(state.unit||"unità");
+      });
+      var unit = document.createElement("span"); unit.className = "fc-unit"; unit.textContent = "%";
+      row.appendChild(inp); row.appendChild(unit);
+      var note = document.createElement("div"); note.className = "fc-note"; note.textContent = f.note;
+      card.appendChild(lbl); card.appendChild(row); card.appendChild(note);
+      grid.appendChild(card);
+    });
+    updateFactorTotal();
+  }
+
+  function updateFactorTotal(){
+    var totalEl = document.getElementById("factor-total");
+    var factors = state.factors || [];
+    var sum = factors.reduce(function(s,f){ return s + (parseFloat(f.pct)||0); }, 0);
+    var cls = sum > 0 ? "pos" : sum < 0 ? "neg" : "";
+    var sign = sum > 0 ? "+" : "";
+    totalEl.innerHTML =
+      '<span class="ft-label">Correzione totale applicata:</span> ' +
+      '<span class="ft-val '+cls+'">'+sign+sum.toFixed(0)+'%</span>' +
+      '<span class="ft-label"> · Le proiezioni vengono moltiplicate per <strong>'+(1+sum/100).toFixed(2)+'</strong></span>';
   }
 
   function loadState(){
     try{
       var raw = localStorage.getItem(STORAGE_KEY);
-      if(!raw) return { entries:[], unit:"unità", byFornitore:{} };
+      if(!raw) return { entries:[], unit:"unità", byFornitore:{}, byRid:{}, monthlyTotals:{}, currentMonth:null, factors:defaultFactors() };
       var parsed = JSON.parse(raw);
-      if(!parsed || !Array.isArray(parsed.entries)) return { entries:[], unit:"unità", byFornitore:{} };
+      if(!parsed || typeof parsed !== "object") return { entries:[], unit:"unità", byFornitore:{}, byRid:{}, monthlyTotals:{}, currentMonth:null };
+      if(!Array.isArray(parsed.entries)) parsed.entries = [];
       if(typeof parsed.unit !== "string" || !parsed.unit) parsed.unit = "unità";
       if(!parsed.byFornitore || typeof parsed.byFornitore !== "object" || Array.isArray(parsed.byFornitore)) parsed.byFornitore = {};
       if(!parsed.byRid || typeof parsed.byRid !== "object" || Array.isArray(parsed.byRid)) parsed.byRid = {};
       if(!parsed.monthlyTotals || typeof parsed.monthlyTotals !== "object" || Array.isArray(parsed.monthlyTotals)) parsed.monthlyTotals = {};
+      if(!parsed.currentMonth || typeof parsed.currentMonth !== "object") parsed.currentMonth = null;
+      if(!Array.isArray(parsed.factors)) parsed.factors = defaultFactors();
       return parsed;
-    }catch(e){ return { entries:[], unit:"unità", byFornitore:{} }; }
+    }catch(e){ return { entries:[], unit:"unità", byFornitore:{}, byRid:{}, monthlyTotals:{}, currentMonth:null, factors:defaultFactors() }; }
   }
 
   function saveState(st){
@@ -506,7 +589,6 @@
   }
 
   var state = loadState();
-  var editingDate = null;
 
   // ---------- mese corrente ----------
   function currentMonthPrefix(){
@@ -515,10 +597,6 @@
   }
   function currentMonthName(){
     return new Date().toLocaleDateString("it-IT",{month:"long",year:"numeric"});
-  }
-  function currentMonthEntries(){
-    var pfx = currentMonthPrefix();
-    return sortedEntries().filter(function(e){ return e.date.slice(0,7)===pfx; });
   }
   // Giorni lavorativi rimanenti nel mese corrente (lun-ven, da domani in poi)
   function workdaysRemaining(){
@@ -540,36 +618,22 @@
     for(var d=1;d<=lastDay;d++){ var dow=new Date(y,m,d).getDay(); if(dow!==0&&dow!==6) count++; }
     return count;
   }
+  // Giorni lavorativi trascorsi nel mese corrente (dal 1° a oggi incluso)
+  function workdaysSoFar(){
+    var today=new Date(), y=today.getFullYear(), m=today.getMonth(), count=0;
+    for(var d=1;d<=today.getDate();d++){ var dow=new Date(y,m,d).getDay(); if(dow!==0&&dow!==6) count++; }
+    return count;
+  }
 
-  // Mesi passati (completi): unisce dati giornalieri salvati + caricamenti bulk
+  // Mesi passati (completi) da storico Supermoney
   function pastMonthlyTotals(){
     var pfx=currentMonthPrefix();
     var months={};
-
-    // Da dati giornalieri in localStorage
-    sortedEntries().forEach(function(e){
-      var m=e.date.slice(0,7);
-      if(m>=pfx) return;
-      if(!months[m]) months[m]={ key:m, label:monthName(m), total:0, rid:0, days:0, workdays:workdaysInMonth(m) };
-      months[m].total += e.value;
-      months[m].rid += (state.byRid&&state.byRid[e.date])||0;
-      months[m].days++;
-    });
-
-    // Da caricamento bulk storico (state.monthlyTotals)
     Object.keys(state.monthlyTotals||{}).forEach(function(ym){
       if(ym>=pfx) return;
       var mt=state.monthlyTotals[ym];
-      if(!months[ym]){
-        months[ym]={ key:ym, label:monthName(ym), total:mt.total, rid:mt.rid||0, days:mt.workdays||0, workdays:mt.workdays||workdaysInMonth(ym) };
-      } else {
-        // I dati bulk sovrascrivono quelli giornalieri se più completi
-        if(mt.total > months[ym].total){
-          months[ym].total=mt.total; months[ym].rid=mt.rid||0;
-        }
-      }
+      months[ym]={ key:ym, label:monthName(ym), total:mt.total, rid:mt.rid||0, workdays:mt.workdays||workdaysInMonth(ym) };
     });
-
     return Object.values(months).sort(function(a,b){ return a.key<b.key?-1:1; });
   }
 
@@ -579,27 +643,22 @@
 
   // Proiezione blended storico+corrente (approccio bayesiano semplificato):
   // all'inizio del mese si àncora allo storico, poi man mano cede peso ai dati correnti.
-  // confidence = min(1, giorni_inseriti / giorni_lavorativi_totali_mese)
-  function blendedProjection(currentEntries, soFar, remaining){
+  // confidence = min(1, giorni_lavorativi_trascorsi / giorni_lavorativi_totali_mese)
+  function blendedProjection(soFar, wdSoFar, remaining){
     var past=pastMonthlyTotals();
     if(!past.length) return null;
     var histMonthlyAvg=simpleAverage(past.map(function(m){ return m.total; }));
     if(!histMonthlyAvg) return null;
-    // Media dei giorni lavorativi totali dei mesi storici
     var histWorkdays=simpleAverage(past.map(function(m){ return m.workdays||22; }));
     var histDailyRate=histMonthlyAvg/histWorkdays;
-    var currentDailyRate=currentEntries.length?simpleAverage(currentEntries.map(function(e){return e.value;}))||histDailyRate:histDailyRate;
+    var currentDailyRate=wdSoFar>0?soFar/wdSoFar:histDailyRate;
     var totalWd=workdaysInMonth(currentMonthPrefix());
-    // Confidence: cresce linearmente da 0 a 1 nell'arco del mese lavorativo
-    var confidence=totalWd>0?Math.min(1,currentEntries.length/totalWd):0;
+    var confidence=totalWd>0?Math.min(1,wdSoFar/totalWd):0;
     var blendedRate=confidence*currentDailyRate+(1-confidence)*histDailyRate;
     return Math.round(soFar+blendedRate*remaining);
   }
 
   // ---------- math ----------
-  function sortedEntries(){
-    return state.entries.slice().sort(function(a,b){ return a.date<b.date?-1:a.date>b.date?1:0; });
-  }
   function simpleAverage(vals){
     if(!vals.length) return null;
     return vals.reduce(function(s,v){ return s+v; },0)/vals.length;
@@ -611,14 +670,6 @@
     var den=n*sxx-sx*sx; if(!den) return null;
     var slope=(n*sxy-sx*sy)/den, int=(sy-slope*sx)/n;
     return { slope:slope, intercept:int, projection:slope*n+int };
-  }
-  function weightedRecent(vals){
-    if(!vals.length) return null;
-    var last3=vals.slice(Math.max(0,vals.length-3));
-    var w=last3.length===1?[1]:last3.length===2?[1,2]:[1,2,3];
-    var s=0,ws=0;
-    for(var i=0;i<last3.length;i++){ s+=last3[i]*w[i]; ws+=w[i]; }
-    return s/ws;
   }
   function clip0(v){ return v===null?null:Math.max(0,v); }
 
@@ -642,129 +693,113 @@
   }
 
   function render(){
-    var monthEntries = currentMonthEntries();
-    var allEntries   = sortedEntries();
     var unit = state.unit || "unità";
     document.getElementById("forecast-title").textContent = "Proiezione a fine " + currentMonthName();
-    renderStats(monthEntries, unit);
-    renderChart(monthEntries, unit);
-    renderProviders(monthEntries, unit);
+    renderFactors();
+    renderStats(unit);
+    renderProviders(unit);
     renderMonthlyHistory(unit);
-    renderTable(allEntries, unit);
   }
 
-  function renderStats(entries, unit){
+  function renderStats(unit){
     var grid = document.getElementById("stat-grid");
     var ctx  = document.getElementById("forecast-context");
     grid.innerHTML = "";
 
-    var vals     = entries.map(function(e){ return e.value; });
-    var soFar    = vals.reduce(function(s,v){ return s+v; }, 0);
+    var cm       = state.currentMonth; // snapshot mese corrente da Supermoney
     var remaining = workdaysRemaining();
-    var n        = entries.length;
+    var totalWd  = workdaysInMonth(currentMonthPrefix());
 
-    if(!n){
-      ctx.textContent = "Nessun dato inserito per il mese corrente. Usa il form o sincronizza da Supermoney.";
-    } else {
-      ctx.textContent = fmtNum(soFar,0)+" "+unit+" già realizzati in "+n+" "+(n===1?"giorno":"giorni")+" · "+remaining+" giorni lavorativi rimanenti (lun-ven)";
+    if(!cm || !cm.total){
+      ctx.textContent = "Sincronizzazione in corso… i dati appariranno automaticamente.";
+      return;
     }
 
-    // --- Media semplice ---
-    // Assume che la media giornaliera osservata continui per i giorni rimanenti
-    var avgDaily   = clip0(simpleAverage(vals));
-    var projAvg    = avgDaily !== null ? Math.round(soFar + avgDaily * remaining) : null;
+    var soFar    = cm.total;
+    var wdSoFar  = cm.workdaysSoFar || workdaysSoFar();
+    var dailyRate = wdSoFar > 0 ? soFar / wdSoFar : 0;
 
-    // --- Regressione lineare ---
-    // Proietta ogni giorno rimanente con la retta, somma al prodotto attuale
-    // (metodo più affidabile se il trend è costante)
-    var trend      = linearTrend(vals);
-    var projTrend  = null;
-    var trendNote  = "Servono almeno 2 giorni di dati.", trendPill = null;
-    if(trend){
-      var tsum = soFar;
-      for(var i = 0; i < remaining; i++){
-        tsum += Math.max(0, trend.slope*(n+i) + trend.intercept);
-      }
-      projTrend = Math.round(tsum);
-      if(Math.abs(trend.slope) < (avgDaily||1)*0.05){
-        trendNote = "Trend stabile — variazione giornaliera trascurabile.";
-        trendPill = {cls:"flat", text:"➝ stabile"};
-      } else if(trend.slope > 0){
-        trendNote = "Trend in crescita: +"+fmtNum(trend.slope)+" "+unit+"/giorno.";
-        trendPill = {cls:"up", text:"▲ in crescita"};
-      } else {
-        trendNote = "Trend in calo: "+fmtNum(trend.slope)+" "+unit+"/giorno.";
-        trendPill = {cls:"down", text:"▼ in calo"};
+    ctx.textContent = fmtNum(soFar,0)+" "+unit+" da inizio mese · tasso: "+fmtNum(dailyRate,1)+" "+unit+"/giorno lavorativo · "+remaining+" giorni lavorativi rimanenti";
+
+    var fm = totalFactorMultiplier(); // fattore correzione (es. 0.85 = -15%)
+
+    // --- 1. Proiezione lineare (tasso corrente) ---
+    var projLineare = Math.round((soFar + dailyRate * remaining) * fm);
+    grid.appendChild(statCard({
+      color:"var(--accent)", label:"Proiezione lineare (tasso corrente)",
+      value:projLineare, unit:unit,
+      note:"Tasso attuale: "+fmtNum(dailyRate,1)+" "+unit+"/giorno × "+remaining+" gg rimanenti.",
+      pill:null
+    }));
+
+    // --- 2. Trend regressione mesi precedenti ---
+    var past = pastMonthlyTotals();
+    var projTrend = null, trendNote = "Servono almeno 2 mesi di storico.", trendPill = null;
+    if(past.length >= 2){
+      var monthlyVals = past.map(function(m){ return m.total; });
+      var trend = linearTrend(monthlyVals);
+      if(trend){
+        projTrend = Math.max(0, Math.round(trend.slope * monthlyVals.length + trend.intercept)) * fm | 0;
+        if(Math.abs(trend.slope) < (simpleAverage(monthlyVals)||1)*0.03){
+          trendNote = "Trend mensile stabile."; trendPill = {cls:"flat", text:"➝ stabile"};
+        } else if(trend.slope > 0){
+          trendNote = "Trend mensile in crescita: +"+fmtNum(trend.slope,0)+" "+unit+"/mese."; trendPill = {cls:"up", text:"▲ crescita"};
+        } else {
+          trendNote = "Trend mensile in calo: "+fmtNum(trend.slope,0)+" "+unit+"/mese."; trendPill = {cls:"down", text:"▼ calo"};
+        }
       }
     }
+    grid.appendChild(statCard({
+      color:"var(--series-trend)", label:"Trend regressione mesi precedenti",
+      value:projTrend, unit:unit,
+      note:trendNote, pill:trendPill
+    }));
 
-    // --- Media ponderata mesi precedenti (pesi 1-2-3 sul tasso giornaliero lavorativo) ---
-    var past       = pastMonthlyTotals();
-    var projW      = null;
-    var wNote      = "Nessun mese precedente disponibile ancora.";
+    // --- 3. Media ponderata mesi precedenti (pesi 1-2-3 su tasso gg lavorativi) ---
+    var projW = null, wNote = "Nessun mese precedente disponibile ancora.";
     if(past.length){
       var recent = past.slice(-3);
-      var wts    = recent.length===1?[1]:recent.length===2?[1,2]:[1,2,3];
+      var wts = recent.length===1?[1]:recent.length===2?[1,2]:[1,2,3];
       var wRate=0, wTot=0;
       recent.forEach(function(m,i){
         var rate = m.workdays>0 ? m.total/m.workdays : 0;
         wRate += rate*wts[i]; wTot += wts[i];
       });
       var wDailyRate = wTot>0 ? wRate/wTot : 0;
-      projW = Math.round(soFar + wDailyRate * remaining);
-      wNote = "Pesi 1-2-3 sul tasso giornaliero (gg lavorativi) degli ultimi "+recent.length+
-              " mes"+(recent.length===1?"e":"i")+". Tasso: "+fmtNum(wDailyRate,1)+" "+unit+"/giorno.";
+      projW = Math.round((soFar + wDailyRate * remaining) * fm);
+      wNote = "Pesi 1-2-3 sul tasso giornaliero degli ultimi "+recent.length+" mes"+(recent.length===1?"e":"i")+
+              ". Tasso storico: "+fmtNum(wDailyRate,1)+" "+unit+"/giorno.";
     }
-
-    grid.appendChild(statCard({
-      color:"var(--accent)", label:"Media semplice (mese corrente)",
-      value:projAvg, unit:unit,
-      note: n ? "Tasso: "+fmtNum(avgDaily)+" "+unit+"/giorno · stima residuo: +"+fmtNum(projAvg!==null?projAvg-soFar:null,0) : "Inserisci almeno un dato.",
-      pill:null
-    }));
-    grid.appendChild(statCard({
-      color:"var(--series-trend)", label:"Trend (regressione lineare)",
-      value:projTrend, unit:unit,
-      note:trendNote, pill:trendPill
-    }));
     grid.appendChild(statCard({
       color:"var(--series-weighted)", label:"Media pond. mesi precedenti",
-      value:projW, unit:unit,
-      note:wNote,
-      pill:null
+      value:projW, unit:unit, note:wNote, pill:null
     }));
 
-    // --- Card blended storico+corrente ---
-    var projBlended = blendedProjection(entries, soFar, remaining);
-    if(projBlended !== null){
-      var past=pastMonthlyTotals();
-      var histAvg=past.length?Math.round(simpleAverage(past.map(function(m){return m.total;}))):null;
-      var totalWd=workdaysInMonth(currentMonthPrefix());
-      var conf=totalWd>0?Math.min(100,Math.round(entries.length/totalWd*100)):0;
+    // --- 4. Stima bilanciata storico+corrente (Bayesian blend) ---
+    var projBlended = blendedProjection(soFar, wdSoFar, remaining);
+    if(projBlended !== null){ projBlended = Math.round(projBlended * fm);
+      var histAvg = past.length ? Math.round(simpleAverage(past.map(function(m){return m.total;}))) : null;
+      var conf = totalWd>0 ? Math.min(100, Math.round(wdSoFar/totalWd*100)) : 0;
       grid.appendChild(statCard({
-        color:"#6b7fa3", label:"Stima su storico ("+conf+"% dati correnti)",
+        color:"#6b7fa3", label:"Stima bilanciata ("+conf+"% del mese trascorso)",
         value:projBlended, unit:unit,
-        note:"Âncora allo storico a inizio mese, poi cede peso ai dati correnti. " +
-             (histAvg?"Media storica: "+fmtNum(histAvg,0)+" "+unit+"/mese.":"Accumula dati su mesi precedenti per attivare."),
+        note:"Bilancia tasso corrente e media storica. " +
+             (histAvg ? "Media storica: "+fmtNum(histAvg,0)+" "+unit+"/mese." : "Accumula storico per affinare."),
         pill:null
       }));
     }
 
     // --- Card RID ---
-    var ridVals=entries.map(function(e){ return (state.byRid&&state.byRid[e.date])||0; });
-    var hasRid=ridVals.some(function(v){ return v>0; });
-    if(hasRid){
-      var ridSoFar=ridVals.reduce(function(s,v){ return s+v; },0);
-      var ridAvg=clip0(simpleAverage(ridVals));
-      var ridProjAvg=ridAvg!==null?Math.round(ridSoFar+ridAvg*remaining):null;
-      var ridW=clip0(weightedRecent(ridVals));
-      var ridProjW=ridW!==null?Math.round(ridSoFar+ridW*remaining):null;
-      var ridPct=soFar>0?Math.round(ridSoFar/soFar*100):0;
-      var ridProjPct=projAvg&&ridProjAvg?Math.round(ridProjAvg/projAvg*100):null;
+    var ridSoFar = cm.rid || 0;
+    if(ridSoFar > 0){
+      var ridRate = wdSoFar>0 ? ridSoFar/wdSoFar : 0;
+      var ridProj = Math.round(ridSoFar + ridRate * remaining);
+      var ridPct  = soFar>0 ? Math.round(ridSoFar/soFar*100) : 0;
+      var ridProjPct = projLineare>0 ? Math.round(ridProj/projLineare*100) : null;
       grid.appendChild(statCard({
         color:"var(--series-trend)", label:"Proiezione RID (Addebito SDD)",
-        value:ridProjAvg, unit:"RID",
-        note:"Attuale: "+ridSoFar+" RID su "+fmtNum(soFar,0)+" attivi ("+ridPct+"%) · Proj. pond.: "+(ridProjW!==null?fmtNum(ridProjW,0):"—")+(ridProjPct?" · "+ridProjPct+"% stimato":""),
+        value:ridProj, unit:"RID",
+        note:"Attuale: "+ridSoFar+" RID su "+fmtNum(soFar,0)+" attivi ("+ridPct+"%)."+(ridProjPct?" Stima fine mese: "+ridProjPct+"%.":""),
         pill:null
       }));
     }
@@ -783,54 +818,7 @@
     return card;
   }
 
-  function renderChart(entries, unit){
-    var container=document.getElementById("chart-container");
-    var legend=document.getElementById("chart-legend");
-    legend.innerHTML="";
-    if(!entries.length){
-      container.innerHTML='<div class="empty-state">Nessun dato per il mese corrente. Aggiungi il primo valore per vedere il grafico.</div>';
-      return;
-    }
-    var vals=entries.map(function(e){ return e.value; });
-    var avg=clip0(simpleAverage(vals));
-    var trend=linearTrend(vals);
-    var W=760,H=300,padL=54,padR=20,padT=20,padB=40,chartW=W-padL-padR,chartH=H-padT-padB;
-    var n=entries.length,xStep=n>1?chartW/(n-1):0;
-    var allVals=vals.slice(); if(avg!==null) allVals.push(avg);
-    var minV=Math.min.apply(null,allVals.concat([0])),maxV=Math.max.apply(null,allVals);
-    if(maxV===minV) maxV=minV+1;
-    var pad=(maxV-minV)*0.12; minV=Math.max(0,minV-pad); maxV+=pad;
-    function xAt(i){ return padL+(n>1?i*xStep:chartW/2); }
-    function yAt(v){ return padT+chartH-((v-minV)/(maxV-minV))*chartH; }
-    var svg=[];
-    svg.push('<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Andamento produzione mese corrente">');
-    for(var g=0;g<=4;g++){
-      var gv=minV+(maxV-minV)*(g/4),gy=yAt(gv);
-      svg.push('<line x1="'+padL+'" y1="'+gy+'" x2="'+(W-padR)+'" y2="'+gy+'" stroke="var(--line)" stroke-width="1"/>');
-      svg.push('<text x="'+(padL-10)+'" y="'+(gy+4)+'" text-anchor="end" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--muted)">'+fmtNum(gv,0)+'</text>');
-    }
-    if(avg!==null){ var ay=yAt(avg); svg.push('<line x1="'+padL+'" y1="'+ay+'" x2="'+(W-padR)+'" y2="'+ay+'" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="3 4" opacity="0.75"/>'); }
-    if(trend){
-      var tx1=padL,ty1=yAt(Math.max(0,trend.intercept)),tx2=W-padR,ty2=yAt(Math.max(0,trend.slope*(n-1)+trend.intercept));
-      svg.push('<line x1="'+tx1+'" y1="'+ty1.toFixed(1)+'" x2="'+tx2+'" y2="'+ty2.toFixed(1)+'" stroke="var(--series-trend)" stroke-width="1.4" stroke-dasharray="5 4" opacity="0.7"/>');
-    }
-    var pts=entries.map(function(e,i){ return [xAt(i),yAt(e.value)]; });
-    var linePath=pts.map(function(p,i){ return (i===0?"M":"L")+p[0].toFixed(1)+","+p[1].toFixed(1); }).join(" ");
-    var areaPath=linePath+" L"+pts[pts.length-1][0].toFixed(1)+","+(padT+chartH)+" L"+pts[0][0].toFixed(1)+","+(padT+chartH)+" Z";
-    svg.push('<path d="'+areaPath+'" fill="var(--accent)" opacity="0.08" stroke="none"/>');
-    svg.push('<path d="'+linePath+'" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>');
-    pts.forEach(function(p,i){ var isLast=i===pts.length-1; svg.push('<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(isLast?4.5:3)+'" fill="var(--paper-raised)" stroke="var(--accent)" stroke-width="2"/>'); });
-    var labelEvery=Math.max(1,Math.ceil(n/8));
-    entries.forEach(function(e,i){ if(i%labelEvery===0||i===n-1) svg.push('<text x="'+xAt(i).toFixed(1)+'" y="'+(H-14)+'" text-anchor="middle" font-size="10.5" font-family="IBM Plex Sans, sans-serif" fill="var(--muted)">'+fmtDateLabel(e.date)+'</text>'); });
-    svg.push('</svg>');
-    container.innerHTML=svg.join("");
-    legend.innerHTML=
-      '<span class="legend-item"><span class="legend-swatch" style="background:var(--accent)"></span>Produzione giornaliera</span>'+
-      '<span class="legend-item"><span class="legend-swatch" style="background:var(--accent);opacity:.6;height:0;border-top:2px dashed var(--accent);"></span>Media</span>'+
-      '<span class="legend-item"><span class="legend-swatch" style="background:var(--series-trend);height:0;border-top:2px dashed var(--series-trend);"></span>Trend lineare</span>';
-  }
-
-  function renderMonthlyHistory(unit){
+function renderMonthlyHistory(unit){
     var section=document.getElementById("monthly-history-section");
     var past=pastMonthlyTotals();
     if(!past.length){ section.style.display="none"; return; }
@@ -838,16 +826,16 @@
     var hasRid=past.some(function(m){ return m.rid>0; });
     var html='<div class="table-wrap"><table><thead><tr>'+
       '<th>Mese</th><th class="num">Totale ('+unit+')</th>'+
-      '<th class="num">Giorni inseriti</th><th class="num">Media/giorno</th>'+
+      '<th class="num">Gg lavorativi</th><th class="num">Media/giorno</th>'+
       (hasRid?'<th class="num">RID</th><th class="num">% RID</th>':'')+
       '</tr></thead><tbody>';
     past.slice().reverse().forEach(function(m){
-      var avg=m.days>0?(m.total/m.days):0;
+      var avg=m.workdays>0?(m.total/m.workdays):0;
       var ridPct=m.total>0?Math.round(m.rid/m.total*100):0;
       html+='<tr>'+
         '<td>'+escapeHtml(m.label)+'</td>'+
         '<td class="num">'+fmtNum(m.total,0)+'</td>'+
-        '<td class="num">'+m.days+' / '+m.workdays+'</td>'+
+        '<td class="num">'+m.workdays+'</td>'+
         '<td class="num">'+fmtNum(avg,1)+'</td>'+
         (hasRid?'<td class="num">'+m.rid+'</td><td class="num">'+(m.rid>0?ridPct+"%":"—")+'</td>':'')+
         '</tr>';
@@ -856,121 +844,38 @@
     document.getElementById("monthly-history").innerHTML=html;
   }
 
-  function renderProviders(entries, unit){
+  function renderProviders(unit){
     var section=document.getElementById("provider-section");
-    // Raccoglie tutti i provider con dati nel mese corrente
-    var providerMap={};
-    entries.forEach(function(e){
-      var bf=state.byFornitore[e.date];
-      if(bf) Object.keys(bf).forEach(function(f){ if(!providerMap[f]) providerMap[f]=[]; providerMap[f].push({date:e.date,v:bf[f]}); });
-    });
-    var providers=Object.keys(providerMap).sort();
-    if(!providers.length){ section.style.display="none"; return; }
+    var cm=state.currentMonth;
+    if(!cm || !cm.byFornitore || !Object.keys(cm.byFornitore).length){ section.style.display="none"; return; }
     section.style.display="";
     var remaining=workdaysRemaining();
-    var soFarTotal=entries.reduce(function(s,e){ return s+e.value; },0);
-    function projCells(vals){
-      var soFar=vals.reduce(function(s,v){ return s+v; },0);
-      var avg=clip0(simpleAverage(vals));
-      var trend=linearTrend(vals);
-      var w=clip0(weightedRecent(vals));
-      var pAvg=avg!==null?Math.round(soFar+avg*remaining):null;
-      var pTrend=null;
-      if(trend){ var ts=soFar; for(var i=0;i<remaining;i++) ts+=Math.max(0,trend.slope*(vals.length+i)+trend.intercept); pTrend=Math.round(ts); }
-      var pW=w!==null?Math.round(soFar+w*remaining):null;
-      return '<td class="num">'+fmtNum(soFar,0)+'</td>'+
-             '<td class="num">'+(pAvg!==null?fmtNum(pAvg,0):"—")+'</td>'+
-             '<td class="num">'+(pTrend!==null?fmtNum(pTrend,0):"—")+'</td>'+
-             '<td class="num">'+(pW!==null?fmtNum(pW,0):"—")+'</td>';
+    var wdSoFar=cm.workdaysSoFar||workdaysSoFar();
+    function projRow(soFarF){
+      var rate=wdSoFar>0?soFarF/wdSoFar:0;
+      var proj=Math.round(soFarF+rate*remaining);
+      var pct=cm.total>0?Math.round(soFarF/cm.total*100):0;
+      return '<td class="num">'+fmtNum(soFarF,0)+'</td>'+
+             '<td class="num">'+fmtNum(proj,0)+'</td>'+
+             '<td class="num">'+pct+'%</td>';
     }
-    var totalVals=entries.map(function(e){ return e.value; });
+    var providers=Object.keys(cm.byFornitore).sort(function(a,b){ return cm.byFornitore[b]-cm.byFornitore[a]; });
     var html='<div class="table-wrap"><table><thead><tr>'+
-      '<th>Gestore</th><th class="num">Attuale</th><th class="num">Proj. media</th><th class="num">Proj. trend</th><th class="num">Proj. pond.</th>'+
+      '<th>Gestore</th><th class="num">Attuale</th><th class="num">Proiezione fine mese</th><th class="num">% sul totale</th>'+
       '</tr></thead><tbody>';
-    html+='<tr><td><strong>Totale complessivo</strong></td>'+projCells(totalVals)+'</tr>';
+    html+='<tr><td><strong>Totale complessivo</strong></td>'+projRow(cm.total)+'</tr>';
     providers.forEach(function(f){
-      var vals=entries.map(function(e){ var bf=state.byFornitore[e.date]; return (bf&&bf[f])||0; });
-      if(vals.every(function(v){ return v===0; })) return;
-      html+='<tr><td>'+escapeHtml(f)+'</td>'+projCells(vals)+'</tr>';
+      var v=cm.byFornitore[f]||0;
+      if(!v) return;
+      html+='<tr><td>'+escapeHtml(f)+'</td>'+projRow(v)+'</tr>';
     });
     html+='</tbody></table></div>';
     document.getElementById("provider-breakdown").innerHTML=html;
   }
 
-  function renderTable(entries,unit){
-    var wrap=document.getElementById("table-wrap");
-    if(!entries.length){ wrap.innerHTML='<div class="empty-state">Nessun inserimento ancora.</div>'; return; }
-    var html='<table><thead><tr><th>Data</th><th>Produzione ('+escapeHtml(unit)+')</th><th></th></tr></thead><tbody>';
-    entries.slice().reverse().forEach(function(e){
-      html+='<tr data-date="'+e.date+'"><td>'+fmtDateLabel(e.date)+' <span style="color:var(--muted);font-size:.78rem;">('+e.date+')</span></td>'+
-        '<td class="num">'+fmtNum(e.value)+'</td>'+
-        '<td class="actions"><button data-action="edit" data-date="'+e.date+'">Modifica</button><button data-action="delete" data-date="'+e.date+'">Elimina</button></td></tr>';
-    });
-    html+='</tbody></table>';
-    wrap.innerHTML=html;
-    wrap.querySelectorAll("button[data-action]").forEach(function(btn){
-      btn.addEventListener("click",function(){
-        var d=btn.getAttribute("data-date");
-        if(btn.getAttribute("data-action")==="edit"){ startEdit(d); }
-        else{ if(confirm("Eliminare il dato del "+d+"?")){ deleteEntry(d); } }
-      });
-    });
-  }
-
-  // ---------- actions ----------
-  function upsertEntry(date,value){
-    var idx=state.entries.findIndex(function(e){ return e.date===date; });
-    if(idx>=0){ state.entries[idx].value=value; } else { state.entries.push({date:date,value:value}); }
-    if(pendingSyncData&&pendingSyncData.date===date){
-      state.byFornitore[date]=pendingSyncData.byFornitore;
-      if(!state.byRid) state.byRid={};
-      state.byRid[date]=pendingSyncData.rid||0;
-      pendingSyncData=null;
-    }
-    saveState(state); render();
-  }
-  function deleteEntry(date){
-    state.entries=state.entries.filter(function(e){ return e.date!==date; });
-    delete state.byFornitore[date];
-    if(state.byRid) delete state.byRid[date];
-    saveState(state);
-    if(editingDate===date) resetForm();
-    render();
-  }
-  function startEdit(date){
-    var e=state.entries.find(function(e){ return e.date===date; });
-    if(!e) return;
-    editingDate=date;
-    document.getElementById("date-input").value=date;
-    document.getElementById("value-input").value=e.value;
-    document.getElementById("submit-btn").textContent="Salva modifica";
-    document.getElementById("cancel-edit-btn").style.display="inline-block";
-    showMsg(""); document.getElementById("value-input").focus();
-  }
-  function resetForm(){
-    editingDate=null;
-    document.getElementById("entry-form").reset();
-    document.getElementById("date-input").value=todayISO();
-    document.getElementById("submit-btn").textContent="Aggiungi";
-    document.getElementById("cancel-edit-btn").style.display="none";
-  }
-
   // ---------- init ----------
-  document.getElementById("date-input").value=todayISO();
   document.getElementById("unit-input").value=state.unit||"unità";
 
-  document.getElementById("entry-form").addEventListener("submit",function(ev){
-    ev.preventDefault();
-    var dateVal=document.getElementById("date-input").value;
-    var numVal=parseFloat(document.getElementById("value-input").value);
-    if(!dateVal){ showMsg("Inserisci una data valida.",true); return; }
-    if(isNaN(numVal)||numVal<0){ showMsg("Inserisci un valore >= 0.",true); return; }
-    var wasEditing=!!editingDate;
-    upsertEntry(dateVal,numVal);
-    showMsg(wasEditing?"Dato del "+dateVal+" aggiornato.":"Dato del "+dateVal+" aggiunto.");
-    resetForm();
-  });
-  document.getElementById("cancel-edit-btn").addEventListener("click",function(){ resetForm(); showMsg(""); });
   document.getElementById("unit-input").addEventListener("change",function(){
     var u=document.getElementById("unit-input").value.trim();
     state.unit=u||"unità"; saveState(state); render();
@@ -1016,29 +921,35 @@
     hint.textContent="Auto-sync ogni 20 min · ultima: "+(lastDate||"mai");
   }
 
-  function doSync(dateVal, silent){
+  function doSync(silent){
     var btn=document.getElementById("sync-btn");
     var panel=document.getElementById("sync-panel");
     if(!silent){ btn.disabled=true; btn.textContent="Sincronizzazione…"; panel.innerHTML=""; showMsg(""); }
-    return fetch("/.netlify/functions/get-produzione?date="+dateVal)
+    return fetch("/.netlify/functions/get-produzione")
       .then(function(res){ return res.json().then(function(d){ return {ok:res.ok,data:d}; }); })
       .then(function(r){
         if(!r.ok){
           if(!silent) showMsg((r.data&&r.data.error)||"Errore Supermoney.",true);
           return;
         }
-        if(r.data.totals.total===0){
-          if(!silent) showMsg("Nessun contratto trovato su Supermoney per il "+dateVal+".",false);
-          return;
-        }
-        // Salva automaticamente senza passare per il form
-        pendingSyncData={ date:dateVal, byFornitore:r.data.byFornitoreActive||r.data.byFornitore, rid:r.data.rid };
-        upsertEntry(dateVal, r.data.value);
+        var ym=currentMonthPrefix();
+        var wdSF=workdaysSoFar();
+        // Salva snapshot mese corrente
+        state.currentMonth={
+          ym: ym,
+          total: r.data.value,
+          rid: r.data.rid||0,
+          ridPct: r.data.ridPct||"0.0",
+          byFornitore: r.data.byFornitoreActive||{},
+          workdaysSoFar: wdSF,
+          lastSync: new Date().toISOString()
+        };
+        saveState(state);
+        render();
         var now=new Date().toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"});
         updateSyncHint(now);
         if(!silent){
-          document.getElementById("value-input").value=r.data.value;
-          showMsg("Supermoney "+dateVal+": "+r.data.value+" contratti attivi (non KO) · RID: "+r.data.rid+" ("+r.data.ridPct+"%) · KO esclusi: "+r.data.totals.ko+". Salvato automaticamente.",false);
+          showMsg(r.data.value+" contratti attivi da inizio mese · RID: "+r.data.rid+" ("+r.data.ridPct+"%) · KO esclusi: "+r.data.totals.ko+".",false);
           renderSyncPanel(r.data);
         }
       })
@@ -1053,46 +964,33 @@
   // Auto-sync ogni 20 minuti (salva silenziosamente)
   function scheduleAutoSync(){
     setInterval(function(){
-      doSync(todayISO(), true);
+      doSync(true);
     }, AUTO_SYNC_MS);
   }
   scheduleAutoSync();
   // Prima sync automatica all'avvio (silenziosa)
-  doSync(todayISO(), true);
+  doSync(true);
 
   document.getElementById("sync-btn").addEventListener("click",function(){
-    var btn=document.getElementById("sync-btn");
-    var panel=document.getElementById("sync-panel");
-    var dateVal=document.getElementById("date-input").value||todayISO();
-    doSync(dateVal, false);
+    doSync(false);
   });
 
-  document.getElementById("storico-btn").addEventListener("click",function(){
-    var btn=document.getElementById("storico-btn");
-    var hint=document.getElementById("sync-hint");
-    btn.disabled=true;
-    btn.textContent="Caricamento storico…";
-    hint.textContent="Caricamento ultimi 6 mesi da Supermoney…";
+  // Carica storico 6 mesi in automatico all'avvio (silenzioso)
+  function loadStorico(){
     fetch("/.netlify/functions/get-storico-mensile?months=6")
       .then(function(res){ return res.json().then(function(d){ return {ok:res.ok,data:d}; }); })
       .then(function(r){
-        if(!r.ok) throw new Error(r.data.error||"Errore storico");
+        if(!r.ok) return;
         var months=r.data.months||[];
         months.forEach(function(m){
           state.monthlyTotals[m.month]={ total:m.total, rid:m.rid||0, ridPct:m.ridPct||"0.0", workdays:m.workdays||workdaysInMonth(m.month) };
         });
         saveState(state);
         render();
-        hint.textContent="Storico caricato: "+months.length+" mesi · auto-sync ogni 20 min";
       })
-      .catch(function(err){
-        hint.textContent="Errore caricamento storico: "+err.message;
-      })
-      .finally(function(){
-        btn.disabled=false;
-        btn.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><polyline points="12 7 12 12 15 15"/></svg> Carica storico 6 mesi';
-      });
-  });
+      .catch(function(){}); // silenzioso in caso di errore
+  }
+  loadStorico();
 
 })();
 </script>
