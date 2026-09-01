@@ -1412,8 +1412,8 @@ function renderMonthlyHistory(unit){
       .catch(function(){ btn.textContent="⟳ Aggiorna PUN & PSV"; btn.disabled=false; });
   });
 
-  // Fetch silenzioso all'avvio
-  fetchPrezziMercato(false);
+  // Fetch PUN & PSV sempre aggiornati all'avvio (force=true, ignora cache)
+  fetchPrezziMercato(true);
 
   render();
 
