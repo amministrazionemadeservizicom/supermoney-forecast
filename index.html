@@ -428,6 +428,10 @@
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
           Sincronizza da Supermoney
         </button>
+        <button type="button" class="sync-btn" id="storico-btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><polyline points="12 7 12 12 15 15"/></svg>
+          Carica storico 6 mesi
+        </button>
         <span class="sync-hint" id="sync-hint">Auto-sync ogni 20 min · ultima: mai</span>
       </div>
       <div id="sync-panel"></div>
@@ -491,6 +495,7 @@
       if(typeof parsed.unit !== "string" || !parsed.unit) parsed.unit = "unità";
       if(!parsed.byFornitore || typeof parsed.byFornitore !== "object" || Array.isArray(parsed.byFornitore)) parsed.byFornitore = {};
       if(!parsed.byRid || typeof parsed.byRid !== "object" || Array.isArray(parsed.byRid)) parsed.byRid = {};
+      if(!parsed.monthlyTotals || typeof parsed.monthlyTotals !== "object" || Array.isArray(parsed.monthlyTotals)) parsed.monthlyTotals = {};
       return parsed;
     }catch(e){ return { entries:[], unit:"unità", byFornitore:{} }; }
   }
@@ -536,10 +541,12 @@
     return count;
   }
 
-  // Mesi passati (completi) con i loro totali
+  // Mesi passati (completi): unisce dati giornalieri salvati + caricamenti bulk
   function pastMonthlyTotals(){
     var pfx=currentMonthPrefix();
     var months={};
+
+    // Da dati giornalieri in localStorage
     sortedEntries().forEach(function(e){
       var m=e.date.slice(0,7);
       if(m>=pfx) return;
@@ -548,6 +555,21 @@
       months[m].rid += (state.byRid&&state.byRid[e.date])||0;
       months[m].days++;
     });
+
+    // Da caricamento bulk storico (state.monthlyTotals)
+    Object.keys(state.monthlyTotals||{}).forEach(function(ym){
+      if(ym>=pfx) return;
+      var mt=state.monthlyTotals[ym];
+      if(!months[ym]){
+        months[ym]={ key:ym, label:monthName(ym), total:mt.total, rid:mt.rid||0, days:mt.workdays||0, workdays:mt.workdays||workdaysInMonth(ym) };
+      } else {
+        // I dati bulk sovrascrivono quelli giornalieri se più completi
+        if(mt.total > months[ym].total){
+          months[ym].total=mt.total; months[ym].rid=mt.rid||0;
+        }
+      }
+    });
+
     return Object.values(months).sort(function(a,b){ return a.key<b.key?-1:1; });
   }
 
@@ -1043,6 +1065,33 @@
     var panel=document.getElementById("sync-panel");
     var dateVal=document.getElementById("date-input").value||todayISO();
     doSync(dateVal, false);
+  });
+
+  document.getElementById("storico-btn").addEventListener("click",function(){
+    var btn=document.getElementById("storico-btn");
+    var hint=document.getElementById("sync-hint");
+    btn.disabled=true;
+    btn.textContent="Caricamento storico…";
+    hint.textContent="Caricamento ultimi 6 mesi da Supermoney…";
+    fetch("/.netlify/functions/get-storico-mensile?months=6")
+      .then(function(res){ return res.json().then(function(d){ return {ok:res.ok,data:d}; }); })
+      .then(function(r){
+        if(!r.ok) throw new Error(r.data.error||"Errore storico");
+        var months=r.data.months||[];
+        months.forEach(function(m){
+          state.monthlyTotals[m.month]={ total:m.total, rid:m.rid||0, ridPct:m.ridPct||"0.0", workdays:m.workdays||workdaysInMonth(m.month) };
+        });
+        saveState(state);
+        render();
+        hint.textContent="Storico caricato: "+months.length+" mesi · auto-sync ogni 20 min";
+      })
+      .catch(function(err){
+        hint.textContent="Errore caricamento storico: "+err.message;
+      })
+      .finally(function(){
+        btn.disabled=false;
+        btn.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><polyline points="12 7 12 12 15 15"/></svg> Carica storico 6 mesi';
+      });
   });
 
 })();
