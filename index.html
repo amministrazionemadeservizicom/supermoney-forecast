@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
   :root{
     --paper:#f0f3fb;
@@ -298,6 +299,11 @@
   }
   td.num{font-family:"IBM Plex Mono", monospace; font-variant-numeric: tabular-nums;}
   tr:last-child td{border-bottom:none;}
+  tr.row-clickable{cursor:pointer;}
+  tr.row-clickable:hover td{background:var(--paper);}
+  tr.selected-row td{background:color-mix(in srgb,var(--accent) 8%,transparent); font-weight:500;}
+  .detail-arrow{color:var(--accent); font-size:.8rem;}
+  .sync-detail-box{background:var(--paper-raised); border:1px solid var(--accent); border-radius:var(--radius); padding:1rem;}
   td.actions{display:flex; gap:.4rem; white-space:nowrap;}
   td.actions button{
     background:none;
@@ -392,6 +398,24 @@
     margin:-.4rem 0 .9rem; line-height:1.5;
   }
 
+  /* --- dati mercato --- */
+  .market-inputs{ display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end; }
+  .market-label{ display:flex; flex-direction:column; gap:.35rem; font-size:.8rem; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+  .market-field{ width:160px; padding:.5rem .7rem; border:1px solid var(--line); border-radius:var(--radius); background:var(--paper-raised); color:var(--ink); font-family:"IBM Plex Mono",monospace; font-size:.95rem; }
+  .market-field:focus{ outline:none; border-color:var(--accent); }
+  .market-risparmio{ font-size:.85rem; color:var(--muted); padding:.4rem 0; }
+  .market-risparmio strong{ color:var(--ink); }
+  .market-risparmio .rsp-high{ color:var(--good); font-weight:700; }
+  .market-risparmio .rsp-low{ color:var(--bad); font-weight:700; }
+  .market-actions{ display:flex; align-items:center; gap:.75rem; margin-top:.75rem; flex-wrap:wrap; }
+  .btn-upload{ display:inline-flex; align-items:center; gap:.4rem; padding:.45rem .9rem; border:1px solid var(--line); border-radius:var(--radius); background:var(--paper-raised); color:var(--muted); font-size:.82rem; cursor:pointer; font-weight:500; }
+  .btn-upload:hover{ border-color:var(--accent); color:var(--accent); }
+  .btn-fetch-prezzi{ padding:.45rem .9rem; border:1px solid var(--accent); border-radius:var(--radius); background:transparent; color:var(--accent); font-size:.82rem; cursor:pointer; font-weight:500; }
+  .btn-fetch-prezzi:hover{ background:var(--accent); color:#fff; }
+  .tariffario-status{ font-size:.8rem; color:var(--muted); }
+  .mkt-field{ width:80px; padding:.25rem .4rem; border:1px solid var(--line); border-radius:4px; background:var(--paper); color:var(--ink); font-family:"IBM Plex Mono",monospace; font-size:.8rem; text-align:right; }
+  .mkt-field:focus{ outline:none; border-color:var(--accent); }
+
   /* --- fattori correzione --- */
   .factors-grid{
     display:grid;
@@ -476,6 +500,38 @@
     </div>
   </section>
 
+  <section id="market-section">
+    <h2 class="section-title">Dati mercato (mese corrente)</h2>
+    <p class="forecast-context">Inserisci i prezzi di mercato e le offerte minime attive per abilitare la 5ª proiezione basata sulla competitività.</p>
+    <div class="market-inputs">
+      <label class="market-label">
+        <span>PUN luce (€/kWh)</span>
+        <input id="pun-input" class="market-field" type="number" step="0.001" min="0" placeholder="auto">
+      </label>
+      <label class="market-label">
+        <span>Offerta media luce (€/kWh)</span>
+        <input id="offerta-input" class="market-field" type="number" step="0.001" min="0" placeholder="auto">
+      </label>
+      <label class="market-label">
+        <span>PSV gas (€/smc)</span>
+        <input id="psv-input" class="market-field" type="number" step="0.01" min="0" placeholder="auto">
+      </label>
+      <label class="market-label">
+        <span>Offerta media gas (€/smc)</span>
+        <input id="offerta-gas-input" class="market-field" type="number" step="0.01" min="0" placeholder="auto">
+      </label>
+      <div class="market-risparmio" id="market-risparmio"></div>
+    </div>
+    <div class="market-actions">
+      <label class="btn-upload" title="Carica tariffario Excel per aggiornare automaticamente i prezzi medi">
+        📂 Carica tariffario Excel
+        <input id="tariffario-file" type="file" accept=".xlsx,.xls" style="display:none">
+      </label>
+      <span id="tariffario-status" class="tariffario-status"></span>
+      <button id="fetch-prezzi-btn" class="btn-fetch-prezzi" title="Aggiorna PUN e PSV dai dati GME/energy-charts">⟳ Aggiorna PUN &amp; PSV</button>
+    </div>
+  </section>
+
   <section>
     <h2 class="section-title" id="forecast-title">Proiezione a fine mese</h2>
     <p class="forecast-context" id="forecast-context"></p>
@@ -510,6 +566,55 @@
   "use strict";
 
   var STORAGE_KEY = "produzione-forecast-v1";
+
+  // Offerte calcolate da tariffari aggiornati — set-2026
+  // Luce: min attiva 0.118 Iren Prima Scelta (gara canvass +30€ garantita tutto settembre → conveniente vendere)
+  // Gas:  avg 0.508 (da aggiornare con tariffario settembre)
+  var OFFERTA_DEFAULTS = { luce: 0.118, gas: 0.508 };
+
+  // Offerta minima storica luce — da tariffari reali forniti mese per mese
+  // Fonte: file Tariffe_Fornitori_SM_*.xlsx analizzati
+  // apr-09: 0.119 | apr-20: 0.125 | apr-30: 0.125 | mag-14: 0.115
+  // Quando arriva il SMART 0.094 sarà aggiornato con i file giu/lug/ago
+  // Prezzo medio offerte luce/gas — da tariffari reali analizzati file per file
+  // Fonte: Tariffe_Fornitori_SM_*.xlsx e TARIFFARIO_*.xlsx
+  // apr-09: avg 0.181 | apr-20: avg 0.173 | apr-30: avg 0.155 | mag-14: avg ~0.140 | lug-02: avg 0.133 | ago-27: avg 0.134
+  // set-26: min 0.118 (Iren)
+  var OFFERTA_MIN_STORICA = {
+    luce: {
+      "2025-09": 0.170, "2025-10": 0.165, "2025-11": 0.160, "2025-12": 0.160,
+      "2026-01": 0.165, "2026-02": 0.165, "2026-03": 0.170,
+      "2026-04": 0.155,  // tariffario apr: min ~0.155
+      "2026-05": 0.130,  // tariffario mag-14: Plenitude SMART 0.099 comparsa tra mag e lug
+      "2026-06": 0.099,  // SMART Plenitude 0.099 attiva
+      "2026-07": 0.099,  // SMART Plenitude 0.099 attiva (tariffario lug-02 confermato)
+      "2026-08": 0.099,  // SMART Plenitude 0.099 attiva fino 30/08/2026
+      "2026-09": 0.118   // SMART scaduta 30/08; min attiva: Iren Prima Scelta 0.118 (gara canvass +30€ tutto settembre → commercialmente conveniente)
+    },
+    gas: {
+      "2025-09": 0.560, "2025-10": 0.540, "2025-11": 0.530, "2025-12": 0.530,
+      "2026-01": 0.540, "2026-02": 0.530, "2026-03": 0.530,
+      "2026-04": 0.550,  // tariffario apr: avg ~0.550
+      "2026-05": 0.520,  // stima
+      "2026-06": 0.505,  // interpolazione
+      "2026-07": 0.493,  // tariffario lug-02: avg 0.49275
+      "2026-08": 0.508   // tariffario ago-27: avg 0.508
+    }
+  };
+
+  // PSV mensile storico €/smc (stime da contesto mercato italiano; verranno sovrascritte da GME API)
+  var PSV_STORICO = {
+    "2025-09": 0.360, "2025-10": 0.350, "2025-11": 0.370, "2025-12": 0.390,
+    "2026-01": 0.420, "2026-02": 0.400, "2026-03": 0.390, "2026-04": 0.370,
+    "2026-05": 0.350, "2026-06": 0.360, "2026-07": 0.370, "2026-08": 0.380
+  };
+
+  // PUN mensile storico (fonte: GME via Abbassalebollette.it, sett 2025 - ago 2026)
+  var PUN_STORICO = {
+    "2025-09": 0.11999, "2025-10": 0.11783, "2025-11": 0.12959, "2025-12": 0.13009,
+    "2026-01": 0.15350, "2026-02": 0.12228, "2026-03": 0.14342, "2026-04": 0.11947,
+    "2026-05": 0.11935, "2026-06": 0.13251, "2026-07": 0.15704, "2026-08": 0.17628
+  };
 
   // ---------- fattori correzione ----------
   function defaultFactors(){
@@ -590,6 +695,25 @@
 
   var state = loadState();
 
+  // ---------- migrazione: applica OFFERTA_MIN_STORICA ai mesi già in cache ----------
+  // Garantisce che i valori corretti (es. 0.099 SMART per giu/lug/ago) siano sempre usati
+  (function migrateOffertaStorica(){
+    var changed = false;
+    Object.keys(OFFERTA_MIN_STORICA.luce).forEach(function(ym){
+      if(state.monthlyTotals[ym]){
+        state.monthlyTotals[ym].prezzoOfferta = OFFERTA_MIN_STORICA.luce[ym];
+        changed = true;
+      }
+    });
+    Object.keys(OFFERTA_MIN_STORICA.gas).forEach(function(ym){
+      if(state.monthlyTotals[ym]){
+        state.monthlyTotals[ym].prezzoOffertaGas = OFFERTA_MIN_STORICA.gas[ym];
+        changed = true;
+      }
+    });
+    if(changed) saveState(state);
+  })();
+
   // ---------- mese corrente ----------
   function currentMonthPrefix(){
     var d = new Date();
@@ -632,7 +756,7 @@
     Object.keys(state.monthlyTotals||{}).forEach(function(ym){
       if(ym>=pfx) return;
       var mt=state.monthlyTotals[ym];
-      months[ym]={ key:ym, label:monthName(ym), total:mt.total, rid:mt.rid||0, workdays:mt.workdays||workdaysInMonth(ym) };
+      months[ym]={ key:ym, label:monthName(ym), total:mt.total, rid:mt.rid||0, workdays:mt.workdays||workdaysInMonth(ym), pun:mt.pun||0, prezzoOfferta:mt.prezzoOfferta||0, psv:mt.psv||0, prezzoOffertaGas:mt.prezzoOffertaGas||0 };
     });
     return Object.values(months).sort(function(a,b){ return a.key<b.key?-1:1; });
   }
@@ -802,6 +926,40 @@
       }));
     }
 
+    // --- 5. Proiezione indice mercato (competitività offerta corrente vs storico) ---
+    // Logica: offerta più bassa del passato → più vendite; più alta → meno vendite
+    // Usa solo il prezzo offerta (non PUN) perché è ciò che muove gli agenti
+    var cmOfferta = cm.prezzoOfferta || 0;
+    var cmPun = cm.pun || 0;
+    if(cmOfferta > 0){
+      var mesiOfferta = past.filter(function(m){ return m.prezzoOfferta > 0; });
+      var baseProjLineare5 = soFar + dailyRate * remaining;
+      var indice5, avgOffertaStr;
+      if(mesiOfferta.length > 0){
+        var avgOff = mesiOfferta.reduce(function(s,m){ return s+m.prezzoOfferta; },0) / mesiOfferta.length;
+        // indice: avg storica / offerta corrente → se offerta scende, indice sale (più vendite)
+        indice5 = avgOff / cmOfferta;
+        // cap: massimo ±40% rispetto proiezione lineare (offerta non è l'unico driver)
+        indice5 = Math.max(0.6, Math.min(1.4, indice5));
+        avgOffertaStr = fmtNum(avgOff*1000,1)+" €/MWh avg ("+mesiOfferta.length+" mes"+(mesiOfferta.length===1?"e":"i")+")";
+      } else {
+        indice5 = 1;
+        avgOffertaStr = "nessuno storico";
+      }
+      var projMercato = Math.round(baseProjLineare5 * indice5 * fm);
+      var indice5Str = (indice5 >= 1 ? "+" : "") + Math.round((indice5-1)*100) + "%";
+      var indice5Class = indice5 >= 1.05 ? "up" : indice5 <= 0.95 ? "down" : "flat";
+      var noteM = "Offerta corrente: "+fmtNum(cmOfferta*1000,1)+" €/MWh";
+      if(cmPun>0) noteM += " · PUN: "+fmtNum(cmPun*1000,1)+" €/MWh (risparmio "+fmtNum((cmPun-cmOfferta)*1000,1)+" €/MWh)";
+      noteM += " · Storico: "+avgOffertaStr;
+      grid.appendChild(statCard({
+        color:"#7c3aed", label:"Indice prezzo mercato",
+        value:projMercato, unit:unit,
+        note:noteM,
+        pill:{ cls:indice5Class, text: indice5>=1.05?"▲ offerta competitiva": indice5<=0.95?"▼ offerta debole":"➝ nella media" }
+      }));
+    }
+
     // --- Card RID ---
     var ridSoFar = cm.rid || 0;
     if(ridSoFar > 0){
@@ -839,22 +997,115 @@ function renderMonthlyHistory(unit){
     var hasRid=past.some(function(m){ return m.rid>0; });
     var html='<div class="table-wrap"><table><thead><tr>'+
       '<th>Mese</th><th class="num">Totale ('+unit+')</th>'+
-      '<th class="num">Gg lavorativi</th><th class="num">Media/giorno</th>'+
+      '<th class="num">Gg lav.</th><th class="num">Media/gg</th>'+
       (hasRid?'<th class="num">RID</th><th class="num">% RID</th>':'')+
+      '<th class="num">PUN (€/kWh)</th><th class="num">Off. luce (€/kWh)</th>'+
+      '<th class="num">PSV (€/smc)</th><th class="num">Off. gas (€/smc)</th>'+
+      '<th></th>'+
       '</tr></thead><tbody>';
     past.slice().reverse().forEach(function(m){
       var avg=m.workdays>0?(m.total/m.workdays):0;
       var ridPct=m.total>0?Math.round(m.rid/m.total*100):0;
-      html+='<tr>'+
+      var hasDetail=m.byFornitore&&Object.keys(m.byFornitore).length>0;
+      html+='<tr'+(hasDetail?' class="row-clickable" data-ym="'+m.key+'" title="Clicca per vedere il dettaglio gestori"':'')+'>'+
         '<td>'+escapeHtml(m.label)+'</td>'+
         '<td class="num">'+fmtNum(m.total,0)+'</td>'+
         '<td class="num">'+m.workdays+'</td>'+
         '<td class="num">'+fmtNum(avg,1)+'</td>'+
         (hasRid?'<td class="num">'+m.rid+'</td><td class="num">'+(m.rid>0?ridPct+"%":"—")+'</td>':'')+
+        '<td class="num"><input class="mkt-field pun-field" data-ym="'+m.key+'" type="number" step="0.001" min="0" value="'+(m.pun||"")+'" placeholder="—"></td>'+
+        '<td class="num"><input class="mkt-field off-field" data-ym="'+m.key+'" type="number" step="0.001" min="0" value="'+(m.prezzoOfferta||"")+'" placeholder="—"></td>'+
+        '<td class="num"><input class="mkt-field psv-field" data-ym="'+m.key+'" type="number" step="0.01" min="0" value="'+(m.psv||"")+'" placeholder="—"></td>'+
+        '<td class="num"><input class="mkt-field offgas-field" data-ym="'+m.key+'" type="number" step="0.01" min="0" value="'+(m.prezzoOffertaGas||"")+'" placeholder="—"></td>'+
+        '<td class="num">'+(hasDetail?'<span class="detail-arrow">▶</span>':'')+'</td>'+
         '</tr>';
     });
     html+='</tbody></table></div>';
+    html+='<div id="storico-detail-panel" style="margin-top:12px;display:none;"></div>';
     document.getElementById("monthly-history").innerHTML=html;
+
+    // Salva PUN/offerta quando modificati nella tabella storico
+    document.querySelectorAll("#monthly-history .mkt-field").forEach(function(inp){
+      inp.addEventListener("change", function(e){
+        e.stopPropagation(); // non triggerare click riga
+        var ym=inp.getAttribute("data-ym");
+        if(!state.monthlyTotals[ym]) return;
+        var val=parseFloat(inp.value)||0;
+        if(inp.classList.contains("pun-field")) state.monthlyTotals[ym].pun=val;
+        else if(inp.classList.contains("off-field")) state.monthlyTotals[ym].prezzoOfferta=val;
+        else if(inp.classList.contains("psv-field")) state.monthlyTotals[ym].psv=val;
+        else if(inp.classList.contains("offgas-field")) state.monthlyTotals[ym].prezzoOffertaGas=val;
+        saveState(state);
+        render();
+      });
+      inp.addEventListener("click", function(e){ e.stopPropagation(); }); // blocca click riga
+    });
+
+    // Click su riga → mostra dettaglio per gestore del mese storico
+    document.querySelectorAll("#monthly-history .row-clickable").forEach(function(tr){
+      tr.addEventListener("click", function(){
+        var ym=this.getAttribute("data-ym");
+        var mt=state.monthlyTotals[ym];
+        if(!mt) return;
+        // Deseleziona se già selezionata
+        var panel=document.getElementById("storico-detail-panel");
+        var arrow=this.querySelector(".detail-arrow");
+        if(this.classList.contains("selected-row")){
+          document.querySelectorAll("#monthly-history .selected-row").forEach(function(r){ r.classList.remove("selected-row"); });
+          if(arrow) arrow.textContent="▶";
+          panel.style.display="none"; panel.innerHTML=""; return;
+        }
+        document.querySelectorAll("#monthly-history .selected-row").forEach(function(r){
+          r.classList.remove("selected-row");
+          var a=r.querySelector(".detail-arrow"); if(a) a.textContent="▶";
+        });
+        this.classList.add("selected-row");
+        if(arrow) arrow.textContent="▼";
+        renderStoricoDetail(panel, ym, mt);
+      }.bind(tr));
+    });
+  }
+
+  function renderStoricoDetail(panel, ym, mt){
+    var bf=mt.byFornitore||{};
+    var tf=mt.byTipoFornitura||{};
+    var total=mt.total||0;
+    var providers=Object.keys(bf).sort(function(a,b){ return bf[b].total-bf[a].total; });
+    var hasRid=providers.some(function(f){ return bf[f].rid>0; });
+    var html='<div class="sync-detail-box"><strong>Dettaglio '+monthName(ym)+'</strong>';
+    // Tabella per gestore
+    html+='<div class="table-wrap" style="margin-top:8px"><table><thead><tr>'+
+      '<th>Gestore</th><th class="num">Contratti</th><th class="num">% tot</th>'+
+      (hasRid?'<th class="num">RID</th><th class="num">% RID</th>':'')+
+      '</tr></thead><tbody>';
+    providers.forEach(function(f){
+      var v=bf[f]||{total:0,rid:0};
+      if(!v.total) return;
+      var pct=total>0?Math.round(v.total/total*100):0;
+      var ridPct=v.total>0?Math.round(v.rid/v.total*100):0;
+      html+='<tr><td>'+escapeHtml(f)+'</td>'+
+        '<td class="num">'+v.total+'</td>'+
+        '<td class="num">'+pct+'%</td>'+
+        (hasRid?'<td class="num">'+v.rid+'</td><td class="num">'+(v.rid>0?ridPct+"%":"—")+'</td>':'')+
+        '</tr>';
+    });
+    html+='</tbody></table></div>';
+    // Tabella per tipo fornitura
+    var types=Object.keys(tf).sort(function(a,b){ return tf[b].total-tf[a].total; });
+    if(types.length){
+      html+='<div class="table-wrap" style="margin-top:8px"><table><thead><tr>'+
+        '<th>Tipo fornitura</th><th class="num">Contratti</th><th class="num">% tot</th>'+
+        '</tr></thead><tbody>';
+      types.forEach(function(t){
+        if(!tf[t].total) return;
+        var pct=total>0?Math.round(tf[t].total/total*100):0;
+        html+='<tr><td>'+escapeHtml(t)+'</td><td class="num">'+tf[t].total+'</td><td class="num">'+pct+'%</td></tr>';
+      });
+      html+='</tbody></table></div>';
+    }
+    html+='</div>';
+    panel.innerHTML=html;
+    panel.style.display="";
   }
 
   function renderProviders(unit){
@@ -895,6 +1146,275 @@ function renderMonthlyHistory(unit){
     state.unit=u||"unità"; saveState(state); render();
   });
 
+  // ---------- input mercato (PUN + offerta mese corrente) ----------
+  function initMarketInputs(){
+    var punEl=document.getElementById("pun-input");
+    var offEl=document.getElementById("offerta-input");
+    var psvEl=document.getElementById("psv-input");
+    var offGasEl=document.getElementById("offerta-gas-input");
+    var rspEl=document.getElementById("market-risparmio");
+    var ym=currentMonthPrefix();
+    // Pre-popola da currentMonth o dalla tabella statica PUN
+    if(state.currentMonth){
+      if(state.currentMonth.pun) punEl.value=state.currentMonth.pun;
+      if(state.currentMonth.prezzoOfferta) offEl.value=state.currentMonth.prezzoOfferta;
+      if(state.currentMonth.psv) psvEl.value=state.currentMonth.psv;
+      if(state.currentMonth.prezzoOffertaGas) offGasEl.value=state.currentMonth.prezzoOffertaGas;
+    }
+    // Assicura che currentMonth esista (anche senza sync) per la 5a proiezione
+    if(!state.currentMonth) state.currentMonth={};
+
+    if(!punEl.value){
+      // Usa PUN del mese corrente o, se non disponibile, l'ultimo noto
+      var punVal=PUN_STORICO[ym];
+      if(!punVal){
+        var keys=Object.keys(PUN_STORICO).sort();
+        punVal=PUN_STORICO[keys[keys.length-1]]; // ultimo disponibile
+      }
+      if(punVal) punEl.value=punVal;
+      if(punVal && !state.currentMonth.pun){ state.currentMonth.pun=parseFloat(punVal); saveState(state); }
+    }
+    if(!psvEl.value){
+      // Usa PSV del mese corrente o, se non disponibile, l'ultimo noto
+      var psvVal=PSV_STORICO[ym];
+      if(!psvVal){
+        var psvKeys=Object.keys(PSV_STORICO).sort();
+        psvVal=PSV_STORICO[psvKeys[psvKeys.length-1]]; // ultimo disponibile
+      }
+      if(psvVal) psvEl.value=psvVal;
+      if(psvVal && !state.currentMonth.psv){ state.currentMonth.psv=parseFloat(psvVal); saveState(state); }
+    }
+    if(!offEl.value) offEl.value=OFFERTA_DEFAULTS.luce;
+    if(!offGasEl.value) offGasEl.value=OFFERTA_DEFAULTS.gas;
+    // Salva i default nel currentMonth se non presenti
+    if(!state.currentMonth.prezzoOfferta && OFFERTA_DEFAULTS.luce){ state.currentMonth.prezzoOfferta=OFFERTA_DEFAULTS.luce; saveState(state); }
+    if(!state.currentMonth.prezzoOffertaGas && OFFERTA_DEFAULTS.gas){ state.currentMonth.prezzoOffertaGas=OFFERTA_DEFAULTS.gas; saveState(state); }
+
+    function updateRisparmio(){
+      var pun=parseFloat(punEl.value)||0;
+      var off=parseFloat(offEl.value)||0;
+      var psv=parseFloat(psvEl.value)||0;
+      var offG=parseFloat(offGasEl.value)||0;
+      var parts=[];
+      if(pun>0 && off>0){
+        var rL=pun-off;
+        var cls=rL>0.05?"rsp-high":rL<0.02?"rsp-low":"";
+        parts.push('Luce: <strong class="'+cls+'">'+(rL*1000).toFixed(1)+' €/MWh</strong>');
+      }
+      if(psv>0 && offG>0){
+        var rG=psv-offG;
+        var cls2=rG>0.05?"rsp-high":rG<0.02?"rsp-low":"";
+        parts.push('Gas: <strong class="'+cls2+'">'+(rG*1000).toFixed(1)+' €/MWh risparmio</strong>');
+      }
+      rspEl.innerHTML=parts.length?'Risparmio vs mercato → '+parts.join(' · '):'';
+    }
+    function save(){
+      if(!state.currentMonth) state.currentMonth={};
+      state.currentMonth.pun=parseFloat(punEl.value)||0;
+      state.currentMonth.prezzoOfferta=parseFloat(offEl.value)||0;
+      state.currentMonth.psv=parseFloat(psvEl.value)||0;
+      state.currentMonth.prezzoOffertaGas=parseFloat(offGasEl.value)||0;
+      saveState(state);
+      updateRisparmio();
+      render();
+    }
+    [punEl,offEl,psvEl,offGasEl].forEach(function(el){ el.addEventListener("change",save); });
+    updateRisparmio();
+  }
+  initMarketInputs();
+
+  // ---------- caricamento tariffario Excel ----------
+  function parseTariffarioExcel(file){
+    var status=document.getElementById("tariffario-status");
+    status.textContent="Lettura in corso…";
+    var reader=new FileReader();
+    reader.onload=function(e){
+      try{
+        var wb=XLSX.read(e.target.result,{type:"array",cellDates:true});
+        var ws=wb.Sheets["Fornitori"]||wb.Sheets[wb.SheetNames[0]];
+        var rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
+        if(rows.length<2){ status.textContent="Foglio vuoto o formato non riconosciuto."; return; }
+
+        // Cerca colonne in modo flessibile (header potrebbero variare leggermente)
+        var headers=rows[0].map(function(h){ return String(h).toLowerCase().trim().replace(/\s+/g," "); });
+        function findCol(patterns){
+          for(var pi=0;pi<patterns.length;pi++){
+            var idx=headers.findIndex(function(h){ return h.includes(patterns[pi]); });
+            if(idx>=0) return idx;
+          }
+          return -1;
+        }
+        var iFornitore=findCol(["fornitore"]);
+        var iVend=findCol(["vendibil"]);
+        var iUtenze=findCol(["utenze","tipo"]);
+        var iLuce=findCol(["luce €","luce eur","€/kwh"]);
+        var iGas=findCol(["gas €","gas eur","€/smc"]);
+        var iScad=findCol(["scadenza"]);
+        var iFisso=findCol(["fisso/index","fisso","tipo offerta"]);
+
+        var lucePrices=[], gasPrices=[];
+        var today=new Date();
+
+        rows.slice(1).forEach(function(row){
+          // Filtro vendibilità: se la colonna esiste, deve essere "SI"
+          if(iVend>=0){
+            var vend=String(row[iVend]||"").toUpperCase().trim();
+            if(vend && vend!=="SI") return;
+          }
+          // Filtro tipo offerta: se la colonna esiste, deve contenere "fisso"
+          if(iFisso>=0){
+            var fisso=String(row[iFisso]||"").toLowerCase();
+            if(fisso && !fisso.includes("fisso")) return;
+          }
+          // Scadenza: solo offerte ancora attive
+          if(iScad>=0 && row[iScad]){
+            var scad=row[iScad] instanceof Date?row[iScad]:new Date(row[iScad]);
+            if(!isNaN(scad)&&scad<today) return;
+          }
+
+          var utenze=iUtenze>=0?String(row[iUtenze]||"").toLowerCase():"";
+          var isLuce=!utenze||(utenze.includes("luce")||utenze.includes("elettr")||utenze.includes("ee"));
+          var isGas=!utenze||utenze.includes("gas");
+          var isBusiness=utenze.includes("business")||utenze.includes("piva")||utenze.includes("partita iva");
+          if(isBusiness) return;
+
+          // Luce domestico
+          if(isLuce && iLuce>=0){
+            var raw=String(row[iLuce]||"").replace(",",".").replace(/[^\d.]/g,"");
+            var p=parseFloat(raw);
+            if(!isNaN(p)&&p>0.05&&p<0.5) lucePrices.push(p);
+          }
+          // Gas domestico
+          if(isGas && iGas>=0){
+            var rawG=String(row[iGas]||"").replace(",",".").replace(/[^\d.]/g,"");
+            var pg=parseFloat(rawG);
+            if(!isNaN(pg)&&pg>0.1&&pg<2) gasPrices.push(pg);
+          }
+        });
+
+        var avgL=lucePrices.length?lucePrices.reduce(function(s,v){return s+v;},0)/lucePrices.length:0;
+        var minL=lucePrices.length?Math.min.apply(null,lucePrices):0;
+        var avgG=gasPrices.length?gasPrices.reduce(function(s,v){return s+v;},0)/gasPrices.length:0;
+        var minG=gasPrices.length?Math.min.apply(null,gasPrices):0;
+
+        // Usa il MINIMO come prezzo offerta (offerta più competitiva disponibile)
+        var offL=minL>0?minL:avgL;
+        var offG=minG>0?minG:avgG;
+
+        if(offL>0){
+          OFFERTA_DEFAULTS.luce=Math.round(offL*10000)/10000;
+          document.getElementById("offerta-input").value=OFFERTA_DEFAULTS.luce;
+          if(!state.currentMonth) state.currentMonth={};
+          state.currentMonth.prezzoOfferta=OFFERTA_DEFAULTS.luce;
+        }
+        if(offG>0){
+          OFFERTA_DEFAULTS.gas=Math.round(offG*10000)/10000;
+          document.getElementById("offerta-gas-input").value=OFFERTA_DEFAULTS.gas;
+          if(!state.currentMonth) state.currentMonth={};
+          state.currentMonth.prezzoOffertaGas=OFFERTA_DEFAULTS.gas;
+        }
+        saveState(state);
+        render();
+        var luceTxt=lucePrices.length?"min "+Math.round(minL*10000)/10000+", avg "+Math.round(avgL*10000)/10000+" ("+lucePrices.length+" offerte)":"nessuna";
+        var gasTxt=gasPrices.length?"min "+Math.round(minG*10000)/10000+", avg "+Math.round(avgG*10000)/10000+" ("+gasPrices.length+" offerte)":"nessuna";
+        status.textContent="✓ Luce: "+luceTxt+" · Gas: "+gasTxt;
+        // reset input per consentire ri-caricamento stesso file
+        document.getElementById("tariffario-file").value="";
+      }catch(err){
+        status.textContent="Errore lettura Excel: "+err.message;
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  document.getElementById("tariffario-file").addEventListener("change",function(){
+    if(this.files&&this.files[0]) parseTariffarioExcel(this.files[0]);
+  });
+
+  // ---------- auto-fetch PUN & PSV da Netlify function ----------
+  var MARKET_CACHE_KEY="prezzi-mercato-cache";
+  var MARKET_CACHE_TTL=60*60*1000; // 1 ora
+
+  function fetchPrezziMercato(force){
+    // Controlla cache localStorage
+    if(!force){
+      try{
+        var cached=JSON.parse(localStorage.getItem(MARKET_CACHE_KEY)||"null");
+        if(cached&&cached.cachedAt&&(Date.now()-new Date(cached.cachedAt).getTime())<MARKET_CACHE_TTL){
+          applyPrezziMercato(cached); return;
+        }
+      }catch(_){}
+    }
+    fetch("/.netlify/functions/get-prezzi-mercato")
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if(data.error) return;
+        localStorage.setItem(MARKET_CACHE_KEY,JSON.stringify(data));
+        applyPrezziMercato(data);
+      })
+      .catch(function(){}); // silenzioso
+  }
+
+  function applyPrezziMercato(data){
+    var ym=currentMonthPrefix();
+    // Aggiorna PUN corrente dal dato più recente disponibile
+    var punArr=data.pun||[];
+    var psvArr=data.psv||[];
+    // Trova mese corrente o ultimo disponibile
+    var punCurr=punArr.find(function(m){return m.month===ym;})||punArr[punArr.length-1];
+    var psvCurr=psvArr.find(function(m){return m.month===ym;})||psvArr[psvArr.length-1];
+
+    var punEl=document.getElementById("pun-input");
+    var psvEl=document.getElementById("psv-input");
+
+    // API ha sempre la precedenza sui valori statici di fallback
+    if(punCurr&&punCurr.avg){
+      punEl.value=Math.round(punCurr.avg*100000)/100000;
+      if(!state.currentMonth) state.currentMonth={};
+      state.currentMonth.pun=parseFloat(punEl.value);
+    }
+    if(psvCurr&&psvCurr.avg){
+      psvEl.value=Math.round(psvCurr.avg*10000)/10000;
+      if(!state.currentMonth) state.currentMonth={};
+      state.currentMonth.psv=parseFloat(psvEl.value);
+    }
+
+    // Aggiorna PUN storico nei mesi già salvati
+    punArr.forEach(function(m){
+      if(state.monthlyTotals[m.month]&&!state.monthlyTotals[m.month].pun&&m.avg){
+        state.monthlyTotals[m.month].pun=Math.round(m.avg*100000)/100000;
+      }
+    });
+    psvArr.forEach(function(m){
+      if(state.monthlyTotals[m.month]&&!state.monthlyTotals[m.month].psv&&m.avg){
+        state.monthlyTotals[m.month].psv=Math.round(m.avg*10000)/10000;
+      }
+    });
+
+    saveState(state);
+    render();
+    // aggiorna risparmio visivo
+    document.getElementById("offerta-input").dispatchEvent(new Event("change"));
+  }
+
+  document.getElementById("fetch-prezzi-btn").addEventListener("click",function(){
+    this.textContent="⟳ Aggiornamento…"; this.disabled=true;
+    var btn=this;
+    fetch("/.netlify/functions/get-prezzi-mercato")
+      .then(function(r){return r.json();})
+      .then(function(data){
+        if(!data.error){
+          localStorage.setItem(MARKET_CACHE_KEY,JSON.stringify(data));
+          applyPrezziMercato(data);
+        }
+        btn.textContent="⟳ Aggiorna PUN & PSV"; btn.disabled=false;
+      })
+      .catch(function(){ btn.textContent="⟳ Aggiorna PUN & PSV"; btn.disabled=false; });
+  });
+
+  // Fetch silenzioso all'avvio
+  fetchPrezziMercato(false);
+
   render();
 
   // ---------- sync Supermoney ----------
@@ -903,8 +1423,12 @@ function renderMonthlyHistory(unit){
   function pct(n,d){ return d?(n/d*100).toFixed(1)+"%":"—"; }
 
   function renderSyncPanel(data){
+    var oggiHtml = (data.oggi !== undefined && data.oggi !== null)
+      ? '<div class="sync-kpi prog"><div class="sk-label">Oggi</div><div class="sk-val">'+data.oggi+'</div></div>'
+      : '';
     var html='<div class="sync-summary">'+
       '<div class="sync-kpi"><div class="sk-label">Contratti</div><div class="sk-val">'+data.value+'</div></div>'+
+      oggiHtml+
       '<div class="sync-kpi ok"><div class="sk-label">RID</div><div class="sk-val">'+(data.rid||0)+'</div></div>'+
       '</div>';
     var fornitori=Object.keys(data.byFornitore).sort(function(a,b){ return data.byFornitore[b].total-data.byFornitore[a].total; });
@@ -966,6 +1490,11 @@ function renderMonthlyHistory(unit){
         var dataMonth=r.data.from?r.data.from.slice(0,7):ym;
         var wdSF=dataMonth===ym?workdaysSoFar():workdaysInMonth(dataMonth);
         // Salva snapshot mese corrente
+        // Calcola oggi in ora italiana
+        var nowIt2=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Rome"}));
+        function isoDateIt(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+        var todayStr=isoDateIt(nowIt2);
+
         state.currentMonth={
           ym: ym,
           total: r.data.value,
@@ -975,14 +1504,32 @@ function renderMonthlyHistory(unit){
           byFornitoreDetail: r.data.byFornitore||{},
           byTipoFornitura: r.data.byTipoFornitura||{},
           workdaysSoFar: wdSF,
-          lastSync: new Date().toISOString()
+          lastSync: new Date().toISOString(),
+          oggi: state.currentMonth ? (state.currentMonth.oggi||null) : null,
+          // Mantieni valori mercato già inseriti
+          pun: state.currentMonth ? (state.currentMonth.pun||0) : 0,
+          psv: state.currentMonth ? (state.currentMonth.psv||0) : 0,
+          prezzoOfferta: state.currentMonth ? (state.currentMonth.prezzoOfferta||0) : 0,
+          prezzoOffertaGas: state.currentMonth ? (state.currentMonth.prezzoOffertaGas||0) : 0
         };
         saveState(state);
         render();
         var now=new Date().toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"});
         updateSyncHint(now);
-        renderSyncPanel(r.data); // sempre visibile, anche su auto-sync
+        renderSyncPanel(r.data);
         if(!silent) showMsg(r.data.value+" contratti da inizio mese · RID: "+r.data.rid+" ("+r.data.ridPct+"%)",false);
+
+        // Fetch contratti di oggi (silenzioso)
+        fetch("/.netlify/functions/get-produzione?from="+todayStr+"&to="+todayStr)
+          .then(function(res){ return res.json(); })
+          .then(function(d){
+            if(d.value !== undefined){
+              state.currentMonth.oggi=d.value;
+              saveState(state);
+              renderSyncPanel(Object.assign({}, r.data, {oggi: d.value}));
+            }
+          })
+          .catch(function(){});
       })
       .catch(function(err){
         if(!silent) showMsg("Impossibile contattare Supermoney: "+err.message,true);
@@ -1014,7 +1561,17 @@ function renderMonthlyHistory(unit){
         if(!r.ok) return;
         var months=r.data.months||[];
         months.forEach(function(m){
-          state.monthlyTotals[m.month]={ total:m.total, rid:m.rid||0, ridPct:m.ridPct||"0.0", workdays:m.workdays||workdaysInMonth(m.month) };
+          var existing=state.monthlyTotals[m.month]||{};
+          state.monthlyTotals[m.month]={
+            total:m.total, rid:m.rid||0, ridPct:m.ridPct||"0.0",
+            workdays:m.workdays||workdaysInMonth(m.month),
+            byFornitore:m.byFornitore||{}, byTipoFornitura:m.byTipoFornitura||{},
+            // OFFERTA_MIN_STORICA ha sempre la precedenza (valori corretti mese per mese)
+            // PUN: mantieni manuale se esistente, altrimenti usa PUN_STORICO
+            pun: existing.pun || PUN_STORICO[m.month] || 0,
+            prezzoOfferta: OFFERTA_MIN_STORICA.luce[m.month] || existing.prezzoOfferta || 0,
+            prezzoOffertaGas: OFFERTA_MIN_STORICA.gas[m.month] || existing.prezzoOffertaGas || 0
+          };
         });
         saveState(state);
         render();

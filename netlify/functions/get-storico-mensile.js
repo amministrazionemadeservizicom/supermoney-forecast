@@ -54,26 +54,37 @@ function workdaysInMonth(ym) {
 
 function aggregateMonth(csvText) {
   const lines = csvText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim().split("\n");
-  if (lines.length < 2) return { total: 0, rid: 0 };
+  if (lines.length < 2) return { total: 0, rid: 0, byFornitore: {}, byTipoFornitura: {} };
 
   const headers = parseLine(lines[0]).map(h => h.toLowerCase());
   const idx = {};
-  [["stato","stato"],["modalita pagamento","modalitaPagamento"],["data","data"]].forEach(([h,k]) => {
+  [["stato","stato"],["modalita pagamento","modalitaPagamento"],["fornitore","fornitore"],["tipo fornitura","tipoFornitura"]].forEach(([h,k]) => {
     const i = headers.indexOf(h);
     if (i !== -1) idx[k] = i;
   });
 
   let total = 0, rid = 0;
+  const byFornitore = {}, byTipoFornitura = {};
   lines.slice(1).filter(l => l.trim()).forEach(line => {
     const cols = parseLine(line);
     const stato = (cols[idx.stato] || "").toLowerCase();
     if (stato.startsWith("ko") || stato.includes("annullat")) return;
     total++;
     const mp = (cols[idx.modalitaPagamento] || "").toLowerCase();
-    if (mp.includes("sdd") || mp.includes("addebito")) rid++;
+    const isRid = mp.includes("sdd") || mp.includes("addebito");
+    if (isRid) rid++;
+
+    const f = (idx.fornitore !== undefined ? cols[idx.fornitore] : "") || "Altro";
+    if (!byFornitore[f]) byFornitore[f] = { total: 0, rid: 0 };
+    byFornitore[f].total++;
+    if (isRid) byFornitore[f].rid++;
+
+    const tf = (idx.tipoFornitura !== undefined ? cols[idx.tipoFornitura] : "") || "Altro";
+    if (!byTipoFornitura[tf]) byTipoFornitura[tf] = { total: 0 };
+    byTipoFornitura[tf].total++;
   });
 
-  return { total, rid };
+  return { total, rid, byFornitore, byTipoFornitura };
 }
 
 const HEADERS = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
@@ -102,10 +113,10 @@ exports.handler = async function (event) {
       const workdays = workdaysInMonth(ym);
 
       const csvText = await fetchCSV(token, from, to);
-      const { total, rid } = aggregateMonth(csvText);
+      const { total, rid, byFornitore, byTipoFornitura } = aggregateMonth(csvText);
       const ridPct = total > 0 ? ((rid / total) * 100).toFixed(1) : "0.0";
 
-      results.push({ month: ym, total, rid, ridPct, workdays });
+      results.push({ month: ym, total, rid, ridPct, workdays, byFornitore, byTipoFornitura });
     }
 
     return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ months: results }) };
