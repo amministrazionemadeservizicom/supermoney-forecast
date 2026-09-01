@@ -936,16 +936,32 @@ function renderMonthlyHistory(unit){
   }
 
   function doSync(silent){
+    // Se il login ha fallito in precedenza, non riprovare in automatico
+    // (evita di bloccare l'account Supermoney per troppi tentativi)
+    if(silent && state.loginFailed){
+      return Promise.resolve();
+    }
     var btn=document.getElementById("sync-btn");
     var panel=document.getElementById("sync-panel");
     if(!silent){ btn.disabled=true; btn.textContent="Sincronizzazione…"; panel.innerHTML=""; showMsg(""); }
     return fetch("/.netlify/functions/get-produzione")
-      .then(function(res){ return res.json().then(function(d){ return {ok:res.ok,data:d}; }); })
+      .then(function(res){ return res.json().then(function(d){ return {ok:res.ok,status:res.status,data:d}; }); })
       .then(function(r){
         if(!r.ok){
-          if(!silent) showMsg((r.data&&r.data.error)||"Errore Supermoney.",true);
+          // Errore di login (401/502 con messaggio login) → blocca auto-sync futuro
+          var msg=(r.data&&r.data.error)||"";
+          var isLoginErr=r.status===401||msg.toLowerCase().includes("login")||msg.toLowerCase().includes("credenziali");
+          if(isLoginErr){
+            state.loginFailed=true;
+            saveState(state);
+            showMsg("Login Supermoney fallito — controlla le credenziali. L'auto-sync è sospeso fino al prossimo aggiornamento manuale.",true);
+            return;
+          }
+          if(!silent) showMsg(msg||"Errore Supermoney.",true);
           return;
         }
+        // Login riuscito → reset flag
+        if(state.loginFailed){ state.loginFailed=false; saveState(state); }
         var ym=currentMonthPrefix();
         var dataMonth=r.data.from?r.data.from.slice(0,7):ym;
         var wdSF=dataMonth===ym?workdaysSoFar():workdaysInMonth(dataMonth);
