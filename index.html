@@ -428,7 +428,7 @@
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
           Sincronizza da Supermoney
         </button>
-        <span class="sync-hint">Recupera il dato per la data selezionata nel form</span>
+        <span class="sync-hint" id="sync-hint">Auto-sync ogni 20 min · ultima: mai</span>
       </div>
       <div id="sync-panel"></div>
     </div>
@@ -443,6 +443,11 @@
   <section id="provider-section" style="display:none;">
     <h2 class="section-title">Previsione per gestore</h2>
     <div id="provider-breakdown"></div>
+  </section>
+
+  <section id="monthly-history-section" style="display:none;">
+    <h2 class="section-title">Storico mensile</h2>
+    <div id="monthly-history"></div>
   </section>
 
   <section>
@@ -523,6 +528,52 @@
     return count;
   }
 
+  // Totale giorni lavorativi in un mese "YYYY-MM"
+  function workdaysInMonth(ym){
+    var p=ym.split("-"), y=parseInt(p[0]), m=parseInt(p[1])-1;
+    var lastDay=new Date(y,m+1,0).getDate(), count=0;
+    for(var d=1;d<=lastDay;d++){ var dow=new Date(y,m,d).getDay(); if(dow!==0&&dow!==6) count++; }
+    return count;
+  }
+
+  // Mesi passati (completi) con i loro totali
+  function pastMonthlyTotals(){
+    var pfx=currentMonthPrefix();
+    var months={};
+    sortedEntries().forEach(function(e){
+      var m=e.date.slice(0,7);
+      if(m>=pfx) return;
+      if(!months[m]) months[m]={ key:m, label:monthName(m), total:0, rid:0, days:0, workdays:workdaysInMonth(m) };
+      months[m].total += e.value;
+      months[m].rid += (state.byRid&&state.byRid[e.date])||0;
+      months[m].days++;
+    });
+    return Object.values(months).sort(function(a,b){ return a.key<b.key?-1:1; });
+  }
+
+  function monthName(ym){
+    return new Date(ym+"-01T00:00:00").toLocaleDateString("it-IT",{month:"long",year:"numeric"});
+  }
+
+  // Proiezione blended storico+corrente (approccio bayesiano semplificato):
+  // all'inizio del mese si àncora allo storico, poi man mano cede peso ai dati correnti.
+  // confidence = min(1, giorni_inseriti / giorni_lavorativi_totali_mese)
+  function blendedProjection(currentEntries, soFar, remaining){
+    var past=pastMonthlyTotals();
+    if(!past.length) return null;
+    var histMonthlyAvg=simpleAverage(past.map(function(m){ return m.total; }));
+    if(!histMonthlyAvg) return null;
+    // Media dei giorni lavorativi totali dei mesi storici
+    var histWorkdays=simpleAverage(past.map(function(m){ return m.workdays||22; }));
+    var histDailyRate=histMonthlyAvg/histWorkdays;
+    var currentDailyRate=currentEntries.length?simpleAverage(currentEntries.map(function(e){return e.value;}))||histDailyRate:histDailyRate;
+    var totalWd=workdaysInMonth(currentMonthPrefix());
+    // Confidence: cresce linearmente da 0 a 1 nell'arco del mese lavorativo
+    var confidence=totalWd>0?Math.min(1,currentEntries.length/totalWd):0;
+    var blendedRate=confidence*currentDailyRate+(1-confidence)*histDailyRate;
+    return Math.round(soFar+blendedRate*remaining);
+  }
+
   // ---------- math ----------
   function sortedEntries(){
     return state.entries.slice().sort(function(a,b){ return a.date<b.date?-1:a.date>b.date?1:0; });
@@ -575,8 +626,9 @@
     document.getElementById("forecast-title").textContent = "Proiezione a fine " + currentMonthName();
     renderStats(monthEntries, unit);
     renderChart(monthEntries, unit);
-    renderTable(allEntries, unit);
     renderProviders(monthEntries, unit);
+    renderMonthlyHistory(unit);
+    renderTable(allEntries, unit);
   }
 
   function renderStats(entries, unit){
@@ -646,6 +698,22 @@
       note: n>=3 ? "Pesi 1-2-3: i giorni più recenti pesano di più." : n ? "Con meno di 3 giorni i pesi si adattano." : "Inserisci almeno un dato.",
       pill:null
     }));
+
+    // --- Card blended storico+corrente ---
+    var projBlended = blendedProjection(entries, soFar, remaining);
+    if(projBlended !== null){
+      var past=pastMonthlyTotals();
+      var histAvg=past.length?Math.round(simpleAverage(past.map(function(m){return m.total;}))):null;
+      var totalWd=workdaysInMonth(currentMonthPrefix());
+      var conf=totalWd>0?Math.min(100,Math.round(entries.length/totalWd*100)):0;
+      grid.appendChild(statCard({
+        color:"#6b7fa3", label:"Stima su storico ("+conf+"% dati correnti)",
+        value:projBlended, unit:unit,
+        note:"Âncora allo storico a inizio mese, poi cede peso ai dati correnti. " +
+             (histAvg?"Media storica: "+fmtNum(histAvg,0)+" "+unit+"/mese.":"Accumula dati su mesi precedenti per attivare."),
+        pill:null
+      }));
+    }
 
     // --- Card RID ---
     var ridVals=entries.map(function(e){ return (state.byRid&&state.byRid[e.date])||0; });
@@ -725,6 +793,32 @@
       '<span class="legend-item"><span class="legend-swatch" style="background:var(--accent)"></span>Produzione giornaliera</span>'+
       '<span class="legend-item"><span class="legend-swatch" style="background:var(--accent);opacity:.6;height:0;border-top:2px dashed var(--accent);"></span>Media</span>'+
       '<span class="legend-item"><span class="legend-swatch" style="background:var(--series-trend);height:0;border-top:2px dashed var(--series-trend);"></span>Trend lineare</span>';
+  }
+
+  function renderMonthlyHistory(unit){
+    var section=document.getElementById("monthly-history-section");
+    var past=pastMonthlyTotals();
+    if(!past.length){ section.style.display="none"; return; }
+    section.style.display="";
+    var hasRid=past.some(function(m){ return m.rid>0; });
+    var html='<div class="table-wrap"><table><thead><tr>'+
+      '<th>Mese</th><th class="num">Totale ('+unit+')</th>'+
+      '<th class="num">Giorni inseriti</th><th class="num">Media/giorno</th>'+
+      (hasRid?'<th class="num">RID</th><th class="num">% RID</th>':'')+
+      '</tr></thead><tbody>';
+    past.slice().reverse().forEach(function(m){
+      var avg=m.days>0?(m.total/m.days):0;
+      var ridPct=m.total>0?Math.round(m.rid/m.total*100):0;
+      html+='<tr>'+
+        '<td>'+escapeHtml(m.label)+'</td>'+
+        '<td class="num">'+fmtNum(m.total,0)+'</td>'+
+        '<td class="num">'+m.days+' / '+m.workdays+'</td>'+
+        '<td class="num">'+fmtNum(avg,1)+'</td>'+
+        (hasRid?'<td class="num">'+m.rid+'</td><td class="num">'+(m.rid>0?ridPct+"%":"—")+'</td>':'')+
+        '</tr>';
+    });
+    html+='</tbody></table></div>';
+    document.getElementById("monthly-history").innerHTML=html;
   }
 
   function renderProviders(entries, unit){
@@ -879,23 +973,63 @@
     document.getElementById("sync-panel").innerHTML=html;
   }
 
+  var AUTO_SYNC_MS = 20 * 60 * 1000; // 20 minuti
+
+  function updateSyncHint(lastDate){
+    var hint=document.getElementById("sync-hint");
+    if(!hint) return;
+    hint.textContent="Auto-sync ogni 20 min · ultima: "+(lastDate||"mai");
+  }
+
+  function doSync(dateVal, silent){
+    var btn=document.getElementById("sync-btn");
+    var panel=document.getElementById("sync-panel");
+    if(!silent){ btn.disabled=true; btn.textContent="Sincronizzazione…"; panel.innerHTML=""; showMsg(""); }
+    return fetch("/.netlify/functions/get-produzione?date="+dateVal)
+      .then(function(res){ return res.json().then(function(d){ return {ok:res.ok,data:d}; }); })
+      .then(function(r){
+        if(!r.ok){
+          if(!silent) showMsg((r.data&&r.data.error)||"Errore Supermoney.",true);
+          return;
+        }
+        if(r.data.totals.total===0){
+          if(!silent) showMsg("Nessun contratto trovato su Supermoney per il "+dateVal+".",false);
+          return;
+        }
+        // Salva automaticamente senza passare per il form
+        pendingSyncData={ date:dateVal, byFornitore:r.data.byFornitoreActive||r.data.byFornitore, rid:r.data.rid };
+        upsertEntry(dateVal, r.data.value);
+        var now=new Date().toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"});
+        updateSyncHint(now);
+        if(!silent){
+          document.getElementById("value-input").value=r.data.value;
+          showMsg("Supermoney "+dateVal+": "+r.data.value+" contratti attivi (non KO) · RID: "+r.data.rid+" ("+r.data.ridPct+"%) · KO esclusi: "+r.data.totals.ko+". Salvato automaticamente.",false);
+          renderSyncPanel(r.data);
+        }
+      })
+      .catch(function(err){
+        if(!silent) showMsg("Impossibile contattare Supermoney: "+err.message,true);
+      })
+      .finally(function(){
+        if(!silent){ btn.disabled=false; btn.innerHTML=SYNC_ICON+" Sincronizza da Supermoney"; }
+      });
+  }
+
+  // Auto-sync ogni 20 minuti (salva silenziosamente)
+  function scheduleAutoSync(){
+    setInterval(function(){
+      doSync(todayISO(), true);
+    }, AUTO_SYNC_MS);
+  }
+  scheduleAutoSync();
+  // Prima sync automatica all'avvio (silenziosa)
+  doSync(todayISO(), true);
+
   document.getElementById("sync-btn").addEventListener("click",function(){
     var btn=document.getElementById("sync-btn");
     var panel=document.getElementById("sync-panel");
     var dateVal=document.getElementById("date-input").value||todayISO();
-    btn.disabled=true; btn.textContent="Sincronizzazione…"; panel.innerHTML=""; showMsg("");
-    fetch("/.netlify/functions/get-produzione?date="+dateVal)
-      .then(function(res){ return res.json().then(function(d){ return {ok:res.ok,data:d}; }); })
-      .then(function(r){
-        if(!r.ok){ showMsg((r.data&&r.data.error)||"Errore Supermoney.",true); return; }
-        if(r.data.totals.total===0){ showMsg("Nessun contratto trovato su Supermoney per il "+dateVal+".",false); return; }
-        document.getElementById("value-input").value=r.data.value;
-        pendingSyncData={ date:dateVal, byFornitore:r.data.byFornitoreActive||r.data.byFornitore, rid:r.data.rid };
-        showMsg("Supermoney "+dateVal+": "+r.data.value+" contratti attivi (non KO) · RID: "+r.data.rid+" ("+r.data.ridPct+"%) · KO esclusi: "+r.data.totals.ko+". Verifica e premi Aggiungi.",false);
-        renderSyncPanel(r.data);
-      })
-      .catch(function(err){ showMsg("Impossibile contattare Supermoney: "+err.message,true); })
-      .finally(function(){ btn.disabled=false; btn.innerHTML=SYNC_ICON+" Sincronizza da Supermoney"; });
+    doSync(dateVal, false);
   });
 
 })();
