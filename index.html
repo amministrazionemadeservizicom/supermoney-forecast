@@ -387,16 +387,10 @@
   .sync-tbl td.ok-c{color:var(--good);}
   .sync-tbl td.ko-c{color:var(--bad);}
 
-  /* --- period tabs --- */
-  .period-tabs{display:flex; gap:.4rem; margin-bottom:1rem; flex-wrap:wrap;}
-  .tab-btn{
-    background:transparent; color:var(--muted);
-    border:1px solid var(--line); padding:.35rem .85rem;
-    border-radius:6px; font-family:inherit; font-size:.82rem;
-    font-weight:500; cursor:pointer;
+  .forecast-context{
+    font-size:.82rem; color:var(--muted);
+    margin:-.4rem 0 .9rem; line-height:1.5;
   }
-  .tab-btn.active{background:var(--accent); color:var(--accent-contrast); border-color:var(--accent);}
-  .tab-btn:hover:not(.active){color:var(--ink); border-color:var(--ink);}
 </style>
 </head>
 <body>
@@ -441,12 +435,8 @@
   </section>
 
   <section>
-    <h2 class="section-title" id="forecast-title">Proiezione per il prossimo giorno</h2>
-    <div class="period-tabs" role="tablist">
-      <button class="tab-btn active" data-period="daily" role="tab">Giornaliero</button>
-      <button class="tab-btn" data-period="weekly" role="tab">Settimanale</button>
-      <button class="tab-btn" data-period="monthly" role="tab">Mensile</button>
-    </div>
+    <h2 class="section-title" id="forecast-title">Proiezione a fine mese</h2>
+    <p class="forecast-context" id="forecast-context"></p>
     <div class="stat-grid" id="stat-grid"></div>
   </section>
 
@@ -479,8 +469,7 @@
   "use strict";
 
   var STORAGE_KEY = "produzione-forecast-v1";
-  var currentPeriod = "daily"; // "daily" | "weekly" | "monthly"
-  var pendingSyncData = null;  // { date, byFornitore } da ultima sincronizzazione
+  var pendingSyncData = null; // { date, byFornitore } da ultima sincronizzazione
 
   function todayISO(){
     var d = new Date();
@@ -496,6 +485,7 @@
       if(!parsed || !Array.isArray(parsed.entries)) return { entries:[], unit:"unità", byFornitore:{} };
       if(typeof parsed.unit !== "string" || !parsed.unit) parsed.unit = "unità";
       if(!parsed.byFornitore || typeof parsed.byFornitore !== "object" || Array.isArray(parsed.byFornitore)) parsed.byFornitore = {};
+      if(!parsed.byRid || typeof parsed.byRid !== "object" || Array.isArray(parsed.byRid)) parsed.byRid = {};
       return parsed;
     }catch(e){ return { entries:[], unit:"unità", byFornitore:{} }; }
   }
@@ -508,36 +498,29 @@
   var state = loadState();
   var editingDate = null;
 
-  // ---------- ISO week ----------
-  function isoWeekOf(dateStr){
-    var d = new Date(dateStr + "T00:00:00");
-    var tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-    tmp.setUTCDate(tmp.getUTCDate() + 4 - (tmp.getUTCDay() || 7));
-    var y = tmp.getUTCFullYear();
-    var jan1 = new Date(Date.UTC(y, 0, 1));
-    var w = Math.ceil(((tmp - jan1) / 86400000 + 1) / 7);
-    return y + "-W" + String(w).padStart(2,"0");
+  // ---------- mese corrente ----------
+  function currentMonthPrefix(){
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0");
   }
-  function weekLabel(key){ var p=key.split("-W"); return "Sett."+parseInt(p[1])+"/"+p[0]; }
-  function monthLabel(key){ return new Date(key+"-01T00:00:00").toLocaleDateString("it-IT",{month:"short",year:"2-digit"}); }
-
-  // ---------- aggregation ----------
-  function aggregated(entries, period){
-    if(period === "daily"){
-      return entries.map(function(e){
-        return { key:e.date, label:fmtDateLabel(e.date), value:e.value, bf:state.byFornitore[e.date]||null };
-      });
+  function currentMonthName(){
+    return new Date().toLocaleDateString("it-IT",{month:"long",year:"numeric"});
+  }
+  function currentMonthEntries(){
+    var pfx = currentMonthPrefix();
+    return sortedEntries().filter(function(e){ return e.date.slice(0,7)===pfx; });
+  }
+  // Giorni lavorativi rimanenti nel mese corrente (lun-ven, da domani in poi)
+  function workdaysRemaining(){
+    var today = new Date();
+    var y = today.getFullYear(), m = today.getMonth();
+    var lastDay = new Date(y, m+1, 0).getDate();
+    var count = 0;
+    for(var d = today.getDate()+1; d <= lastDay; d++){
+      var dow = new Date(y, m, d).getDay();
+      if(dow !== 0 && dow !== 6) count++;
     }
-    var groups = {};
-    entries.forEach(function(e){
-      var key = period==="weekly" ? isoWeekOf(e.date) : e.date.slice(0,7);
-      var label = period==="weekly" ? weekLabel(key) : monthLabel(key);
-      if(!groups[key]) groups[key]={ key:key, label:label, value:0, bf:{} };
-      groups[key].value += e.value;
-      var bf = state.byFornitore[e.date];
-      if(bf) Object.keys(bf).forEach(function(f){ groups[key].bf[f]=(groups[key].bf[f]||0)+bf[f]; });
-    });
-    return Object.values(groups).sort(function(a,b){ return a.key<b.key?-1:1; });
+    return count;
   }
 
   // ---------- math ----------
@@ -578,11 +561,6 @@
     return String(s).replace(/[&<>"']/g,function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; });
   }
 
-  // ---------- period helpers ----------
-  function periodNextLabel(){ return {daily:"domani",weekly:"pross. sett.",monthly:"pross. mese"}[currentPeriod]; }
-  function periodUnit(){ return {daily:"giorno",weekly:"settimana",monthly:"mese"}[currentPeriod]; }
-  function periodCount(n){ return n+" "+({daily:n===1?"giorno":"giorni",weekly:n===1?"settimana":"settimane",monthly:n===1?"mese":"mesi"}[currentPeriod]); }
-
   // ---------- rendering ----------
   function showMsg(text,isError){
     var el=document.getElementById("form-msg");
@@ -591,50 +569,102 @@
   }
 
   function render(){
-    var entries=sortedEntries();
-    var unit=state.unit||"unità";
-    var agg=aggregated(entries,currentPeriod);
-    document.getElementById("forecast-title").textContent={
-      daily:"Proiezione per il prossimo giorno",
-      weekly:"Proiezione per la prossima settimana",
-      monthly:"Proiezione per il prossimo mese"
-    }[currentPeriod];
-    renderStats(agg,unit);
-    renderChart(agg,unit);
-    renderTable(entries,unit);
-    renderProviders(agg,unit);
+    var monthEntries = currentMonthEntries();
+    var allEntries   = sortedEntries();
+    var unit = state.unit || "unità";
+    document.getElementById("forecast-title").textContent = "Proiezione a fine " + currentMonthName();
+    renderStats(monthEntries, unit);
+    renderChart(monthEntries, unit);
+    renderTable(allEntries, unit);
+    renderProviders(monthEntries, unit);
   }
 
-  function renderStats(agg,unit){
-    var grid=document.getElementById("stat-grid");
-    grid.innerHTML="";
-    var vals=agg.map(function(a){ return a.value; });
-    var avg=clip0(simpleAverage(vals));
-    var trend=linearTrend(vals);
-    var trendProj=trend?clip0(trend.projection):null;
-    var weighted=clip0(weightedRecent(vals));
+  function renderStats(entries, unit){
+    var grid = document.getElementById("stat-grid");
+    var ctx  = document.getElementById("forecast-context");
+    grid.innerHTML = "";
 
-    grid.appendChild(statCard({
-      color:"var(--accent)", label:"Media semplice", value:avg, unit:unit,
-      note:agg.length?"Media di "+periodCount(agg.length)+" inseriti.":"Aggiungi almeno un dato per calcolarla.",
-      pill:null
-    }));
+    var vals     = entries.map(function(e){ return e.value; });
+    var soFar    = vals.reduce(function(s,v){ return s+v; }, 0);
+    var remaining = workdaysRemaining();
+    var n        = entries.length;
 
-    var trendNote,pill=null;
-    if(!trend){
-      trendNote="Servono almeno 2 "+periodUnit()+"i di dati per il trend.";
+    if(!n){
+      ctx.textContent = "Nessun dato inserito per il mese corrente. Usa il form o sincronizza da Supermoney.";
     } else {
-      var per=trend.slope;
-      if(Math.abs(per)<(avg||1)*0.005){ trendNote="Andamento stabile."; pill={cls:"flat",text:"➝ stabile"}; }
-      else if(per>0){ trendNote="In crescita di circa "+fmtNum(Math.abs(per))+" "+unit+"/"+periodUnit()+"."; pill={cls:"up",text:"▲ in crescita"}; }
-      else { trendNote="In calo di circa "+fmtNum(Math.abs(per))+" "+unit+"/"+periodUnit()+"."; pill={cls:"down",text:"▼ in calo"}; }
+      ctx.textContent = fmtNum(soFar,0)+" "+unit+" già realizzati in "+n+" "+(n===1?"giorno":"giorni")+" · "+remaining+" giorni lavorativi rimanenti (lun-ven)";
     }
-    grid.appendChild(statCard({ color:"var(--series-trend)", label:"Trend (regressione lineare)", value:trendProj, unit:unit, note:trendNote, pill:pill }));
+
+    // --- Media semplice ---
+    // Assume che la media giornaliera osservata continui per i giorni rimanenti
+    var avgDaily   = clip0(simpleAverage(vals));
+    var projAvg    = avgDaily !== null ? Math.round(soFar + avgDaily * remaining) : null;
+
+    // --- Regressione lineare ---
+    // Proietta ogni giorno rimanente con la retta, somma al prodotto attuale
+    // (metodo più affidabile se il trend è costante)
+    var trend      = linearTrend(vals);
+    var projTrend  = null;
+    var trendNote  = "Servono almeno 2 giorni di dati.", trendPill = null;
+    if(trend){
+      var tsum = soFar;
+      for(var i = 0; i < remaining; i++){
+        tsum += Math.max(0, trend.slope*(n+i) + trend.intercept);
+      }
+      projTrend = Math.round(tsum);
+      if(Math.abs(trend.slope) < (avgDaily||1)*0.05){
+        trendNote = "Trend stabile — variazione giornaliera trascurabile.";
+        trendPill = {cls:"flat", text:"➝ stabile"};
+      } else if(trend.slope > 0){
+        trendNote = "Trend in crescita: +"+fmtNum(trend.slope)+" "+unit+"/giorno.";
+        trendPill = {cls:"up", text:"▲ in crescita"};
+      } else {
+        trendNote = "Trend in calo: "+fmtNum(trend.slope)+" "+unit+"/giorno.";
+        trendPill = {cls:"down", text:"▼ in calo"};
+      }
+    }
+
+    // --- Media ponderata ultimi 3 giorni ---
+    // Dà più peso ai giorni recenti (riflette meglio l'andamento corrente)
+    var wDaily     = clip0(weightedRecent(vals));
+    var projW      = wDaily !== null ? Math.round(soFar + wDaily * remaining) : null;
+
     grid.appendChild(statCard({
-      color:"var(--series-weighted)", label:"Media ponderata (ultimi 3)", value:weighted, unit:unit,
-      note:agg.length>=3?"Pesi 1-2-3: il periodo più recente pesa il triplo.":(agg.length===0?"Aggiungi dati per calcolarla.":"Con meno di 3 periodi i pesi si adattano."),
+      color:"var(--accent)", label:"Media semplice",
+      value:projAvg, unit:unit,
+      note: n ? "Media: "+fmtNum(avgDaily)+" "+unit+"/giorno · stima residuo: +"+fmtNum(projAvg!==null?projAvg-soFar:null,0) : "Inserisci almeno un dato.",
       pill:null
     }));
+    grid.appendChild(statCard({
+      color:"var(--series-trend)", label:"Trend (regressione lineare)",
+      value:projTrend, unit:unit,
+      note:trendNote, pill:trendPill
+    }));
+    grid.appendChild(statCard({
+      color:"var(--series-weighted)", label:"Media pond. (ult. 3 giorni)",
+      value:projW, unit:unit,
+      note: n>=3 ? "Pesi 1-2-3: i giorni più recenti pesano di più." : n ? "Con meno di 3 giorni i pesi si adattano." : "Inserisci almeno un dato.",
+      pill:null
+    }));
+
+    // --- Card RID ---
+    var ridVals=entries.map(function(e){ return (state.byRid&&state.byRid[e.date])||0; });
+    var hasRid=ridVals.some(function(v){ return v>0; });
+    if(hasRid){
+      var ridSoFar=ridVals.reduce(function(s,v){ return s+v; },0);
+      var ridAvg=clip0(simpleAverage(ridVals));
+      var ridProjAvg=ridAvg!==null?Math.round(ridSoFar+ridAvg*remaining):null;
+      var ridW=clip0(weightedRecent(ridVals));
+      var ridProjW=ridW!==null?Math.round(ridSoFar+ridW*remaining):null;
+      var ridPct=soFar>0?Math.round(ridSoFar/soFar*100):0;
+      var ridProjPct=projAvg&&ridProjAvg?Math.round(ridProjAvg/projAvg*100):null;
+      grid.appendChild(statCard({
+        color:"var(--series-trend)", label:"Proiezione RID (Addebito SDD)",
+        value:ridProjAvg, unit:"RID",
+        note:"Attuale: "+ridSoFar+" RID su "+fmtNum(soFar,0)+" attivi ("+ridPct+"%) · Proj. pond.: "+(ridProjW!==null?fmtNum(ridProjW,0):"—")+(ridProjPct?" · "+ridProjPct+"% stimato":""),
+        pill:null
+      }));
+    }
   }
 
   function statCard(opts){
@@ -650,74 +680,89 @@
     return card;
   }
 
-  function renderChart(agg,unit){
+  function renderChart(entries, unit){
     var container=document.getElementById("chart-container");
     var legend=document.getElementById("chart-legend");
     legend.innerHTML="";
-    if(!agg.length){
-      container.innerHTML='<div class="empty-state">Nessun dato ancora inserito. Aggiungi il primo valore per vedere il grafico.</div>';
+    if(!entries.length){
+      container.innerHTML='<div class="empty-state">Nessun dato per il mese corrente. Aggiungi il primo valore per vedere il grafico.</div>';
       return;
     }
-    var vals=agg.map(function(a){ return a.value; });
-    var avg=clip0(simpleAverage(vals)),trend=linearTrend(vals),trendProj=trend?clip0(trend.projection):null,weighted=clip0(weightedRecent(vals));
+    var vals=entries.map(function(e){ return e.value; });
+    var avg=clip0(simpleAverage(vals));
+    var trend=linearTrend(vals);
     var W=760,H=300,padL=54,padR=20,padT=20,padB=40,chartW=W-padL-padR,chartH=H-padT-padB;
-    var n=agg.length,slots=n+1,xStep=slots>1?chartW/(slots-1):0;
-    var allVals=vals.slice();
-    if(avg!==null) allVals.push(avg); if(trendProj!==null) allVals.push(trendProj); if(weighted!==null) allVals.push(weighted);
+    var n=entries.length,xStep=n>1?chartW/(n-1):0;
+    var allVals=vals.slice(); if(avg!==null) allVals.push(avg);
     var minV=Math.min.apply(null,allVals.concat([0])),maxV=Math.max.apply(null,allVals);
     if(maxV===minV) maxV=minV+1;
     var pad=(maxV-minV)*0.12; minV=Math.max(0,minV-pad); maxV+=pad;
-    function xAt(i){ return padL+(slots>1?i*xStep:chartW/2); }
+    function xAt(i){ return padL+(n>1?i*xStep:chartW/2); }
     function yAt(v){ return padT+chartH-((v-minV)/(maxV-minV))*chartH; }
     var svg=[];
-    svg.push('<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Grafico andamento produzione e proiezioni">');
+    svg.push('<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Andamento produzione mese corrente">');
     for(var g=0;g<=4;g++){
       var gv=minV+(maxV-minV)*(g/4),gy=yAt(gv);
       svg.push('<line x1="'+padL+'" y1="'+gy+'" x2="'+(W-padR)+'" y2="'+gy+'" stroke="var(--line)" stroke-width="1"/>');
       svg.push('<text x="'+(padL-10)+'" y="'+(gy+4)+'" text-anchor="end" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--muted)">'+fmtNum(gv,0)+'</text>');
     }
     if(avg!==null){ var ay=yAt(avg); svg.push('<line x1="'+padL+'" y1="'+ay+'" x2="'+(W-padR)+'" y2="'+ay+'" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="3 4" opacity="0.75"/>'); }
-    var pts=agg.map(function(a,i){ return [xAt(i),yAt(a.value)]; });
+    if(trend){
+      var tx1=padL,ty1=yAt(Math.max(0,trend.intercept)),tx2=W-padR,ty2=yAt(Math.max(0,trend.slope*(n-1)+trend.intercept));
+      svg.push('<line x1="'+tx1+'" y1="'+ty1.toFixed(1)+'" x2="'+tx2+'" y2="'+ty2.toFixed(1)+'" stroke="var(--series-trend)" stroke-width="1.4" stroke-dasharray="5 4" opacity="0.7"/>');
+    }
+    var pts=entries.map(function(e,i){ return [xAt(i),yAt(e.value)]; });
     var linePath=pts.map(function(p,i){ return (i===0?"M":"L")+p[0].toFixed(1)+","+p[1].toFixed(1); }).join(" ");
     var areaPath=linePath+" L"+pts[pts.length-1][0].toFixed(1)+","+(padT+chartH)+" L"+pts[0][0].toFixed(1)+","+(padT+chartH)+" Z";
     svg.push('<path d="'+areaPath+'" fill="var(--accent)" opacity="0.08" stroke="none"/>');
     svg.push('<path d="'+linePath+'" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>');
     pts.forEach(function(p,i){ var isLast=i===pts.length-1; svg.push('<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(isLast?4.5:3)+'" fill="var(--paper-raised)" stroke="var(--accent)" stroke-width="2"/>'); });
-    if(trend&&trendProj!==null){
-      var lp=pts[pts.length-1],px=xAt(n),py=yAt(trendProj);
-      svg.push('<line x1="'+lp[0].toFixed(1)+'" y1="'+lp[1].toFixed(1)+'" x2="'+px.toFixed(1)+'" y2="'+py.toFixed(1)+'" stroke="var(--series-trend)" stroke-width="2" stroke-dasharray="5 4"/>');
-      svg.push('<path d="M'+(px-5).toFixed(1)+','+py.toFixed(1)+' L'+px.toFixed(1)+','+(py-5).toFixed(1)+' L'+(px+5).toFixed(1)+','+py.toFixed(1)+' L'+px.toFixed(1)+','+(py+5).toFixed(1)+' Z" fill="var(--series-trend)"/>');
-    }
-    if(weighted!==null){ var wx=xAt(n),wy=yAt(weighted); svg.push('<circle cx="'+wx.toFixed(1)+'" cy="'+wy.toFixed(1)+'" r="5.5" fill="var(--series-weighted)" stroke="var(--paper-raised)" stroke-width="2"/>'); }
     var labelEvery=Math.max(1,Math.ceil(n/8));
-    agg.forEach(function(a,i){ if(i%labelEvery===0||i===n-1) svg.push('<text x="'+xAt(i).toFixed(1)+'" y="'+(H-14)+'" text-anchor="middle" font-size="10.5" font-family="IBM Plex Sans, sans-serif" fill="var(--muted)">'+escapeHtml(a.label)+'</text>'); });
-    svg.push('<text x="'+xAt(n).toFixed(1)+'" y="'+(H-14)+'" text-anchor="middle" font-size="10.5" font-weight="600" font-family="IBM Plex Sans, sans-serif" fill="var(--ink)">'+periodNextLabel()+'</text>');
+    entries.forEach(function(e,i){ if(i%labelEvery===0||i===n-1) svg.push('<text x="'+xAt(i).toFixed(1)+'" y="'+(H-14)+'" text-anchor="middle" font-size="10.5" font-family="IBM Plex Sans, sans-serif" fill="var(--muted)">'+fmtDateLabel(e.date)+'</text>'); });
     svg.push('</svg>');
     container.innerHTML=svg.join("");
     legend.innerHTML=
-      '<span class="legend-item"><span class="legend-swatch" style="background:var(--accent)"></span>Storico</span>'+
-      '<span class="legend-item"><span class="legend-swatch" style="background:var(--accent);opacity:.6;height:0;border-top:2px dashed var(--accent);"></span>Media semplice</span>'+
-      '<span class="legend-item"><span class="legend-swatch" style="background:var(--series-trend);height:0;border-top:2px dashed var(--series-trend);"></span>Trend lineare</span>'+
-      '<span class="legend-item"><span class="legend-dot" style="background:var(--series-weighted)"></span>Media pond. (3)</span>';
+      '<span class="legend-item"><span class="legend-swatch" style="background:var(--accent)"></span>Produzione giornaliera</span>'+
+      '<span class="legend-item"><span class="legend-swatch" style="background:var(--accent);opacity:.6;height:0;border-top:2px dashed var(--accent);"></span>Media</span>'+
+      '<span class="legend-item"><span class="legend-swatch" style="background:var(--series-trend);height:0;border-top:2px dashed var(--series-trend);"></span>Trend lineare</span>';
   }
 
-  function renderProviders(agg,unit){
+  function renderProviders(entries, unit){
     var section=document.getElementById("provider-section");
-    var providers=Object.keys(agg.reduce(function(acc,a){ if(a.bf) Object.keys(a.bf).forEach(function(f){ acc[f]=true; }); return acc; },{})).sort();
+    // Raccoglie tutti i provider con dati nel mese corrente
+    var providerMap={};
+    entries.forEach(function(e){
+      var bf=state.byFornitore[e.date];
+      if(bf) Object.keys(bf).forEach(function(f){ if(!providerMap[f]) providerMap[f]=[]; providerMap[f].push({date:e.date,v:bf[f]}); });
+    });
+    var providers=Object.keys(providerMap).sort();
     if(!providers.length){ section.style.display="none"; return; }
     section.style.display="";
-    function fcast(vals){
-      var avg=clip0(simpleAverage(vals)),trend=linearTrend(vals),w=clip0(weightedRecent(vals));
-      return '<td class="num">'+fmtNum(avg)+'</td><td class="num">'+(trend?fmtNum(clip0(trend.projection)):"—")+'</td><td class="num">'+fmtNum(w)+'</td>';
+    var remaining=workdaysRemaining();
+    var soFarTotal=entries.reduce(function(s,e){ return s+e.value; },0);
+    function projCells(vals){
+      var soFar=vals.reduce(function(s,v){ return s+v; },0);
+      var avg=clip0(simpleAverage(vals));
+      var trend=linearTrend(vals);
+      var w=clip0(weightedRecent(vals));
+      var pAvg=avg!==null?Math.round(soFar+avg*remaining):null;
+      var pTrend=null;
+      if(trend){ var ts=soFar; for(var i=0;i<remaining;i++) ts+=Math.max(0,trend.slope*(vals.length+i)+trend.intercept); pTrend=Math.round(ts); }
+      var pW=w!==null?Math.round(soFar+w*remaining):null;
+      return '<td class="num">'+fmtNum(soFar,0)+'</td>'+
+             '<td class="num">'+(pAvg!==null?fmtNum(pAvg,0):"—")+'</td>'+
+             '<td class="num">'+(pTrend!==null?fmtNum(pTrend,0):"—")+'</td>'+
+             '<td class="num">'+(pW!==null?fmtNum(pW,0):"—")+'</td>';
     }
+    var totalVals=entries.map(function(e){ return e.value; });
     var html='<div class="table-wrap"><table><thead><tr>'+
-      '<th>Gestore</th><th class="num">Media semplice</th><th class="num">Trend lineare</th><th class="num">Media pond. (3)</th>'+
+      '<th>Gestore</th><th class="num">Attuale</th><th class="num">Proj. media</th><th class="num">Proj. trend</th><th class="num">Proj. pond.</th>'+
       '</tr></thead><tbody>';
-    html+='<tr><td><strong>Totale complessivo</strong></td>'+fcast(agg.map(function(a){ return a.value; }))+'</tr>';
+    html+='<tr><td><strong>Totale complessivo</strong></td>'+projCells(totalVals)+'</tr>';
     providers.forEach(function(f){
-      var vals=agg.map(function(a){ return (a.bf&&a.bf[f])||0; });
+      var vals=entries.map(function(e){ var bf=state.byFornitore[e.date]; return (bf&&bf[f])||0; });
       if(vals.every(function(v){ return v===0; })) return;
-      html+='<tr><td>'+escapeHtml(f)+'</td>'+fcast(vals)+'</tr>';
+      html+='<tr><td>'+escapeHtml(f)+'</td>'+projCells(vals)+'</tr>';
     });
     html+='</tbody></table></div>';
     document.getElementById("provider-breakdown").innerHTML=html;
@@ -749,6 +794,8 @@
     if(idx>=0){ state.entries[idx].value=value; } else { state.entries.push({date:date,value:value}); }
     if(pendingSyncData&&pendingSyncData.date===date){
       state.byFornitore[date]=pendingSyncData.byFornitore;
+      if(!state.byRid) state.byRid={};
+      state.byRid[date]=pendingSyncData.rid||0;
       pendingSyncData=null;
     }
     saveState(state); render();
@@ -756,6 +803,7 @@
   function deleteEntry(date){
     state.entries=state.entries.filter(function(e){ return e.date!==date; });
     delete state.byFornitore[date];
+    if(state.byRid) delete state.byRid[date];
     saveState(state);
     if(editingDate===date) resetForm();
     render();
@@ -797,15 +845,6 @@
   document.getElementById("unit-input").addEventListener("change",function(){
     var u=document.getElementById("unit-input").value.trim();
     state.unit=u||"unità"; saveState(state); render();
-  });
-
-  // ---------- period tabs ----------
-  document.querySelectorAll(".tab-btn[data-period]").forEach(function(btn){
-    btn.addEventListener("click",function(){
-      currentPeriod=btn.getAttribute("data-period");
-      document.querySelectorAll(".tab-btn[data-period]").forEach(function(b){ b.classList.toggle("active",b===btn); });
-      render();
-    });
   });
 
   render();
@@ -851,8 +890,8 @@
         if(!r.ok){ showMsg((r.data&&r.data.error)||"Errore Supermoney.",true); return; }
         if(r.data.totals.total===0){ showMsg("Nessun contratto trovato su Supermoney per il "+dateVal+".",false); return; }
         document.getElementById("value-input").value=r.data.value;
-        pendingSyncData={ date:dateVal, byFornitore:r.data.byFornitore };
-        showMsg("Dati Supermoney per il "+dateVal+": "+r.data.totals.total+" contratti (OK: "+r.data.totals.ok+", progress: "+r.data.totals.progress+", KO: "+r.data.totals.ko+"). Verifica e premi Aggiungi per salvare.",false);
+        pendingSyncData={ date:dateVal, byFornitore:r.data.byFornitoreActive||r.data.byFornitore, rid:r.data.rid };
+        showMsg("Supermoney "+dateVal+": "+r.data.value+" contratti attivi (non KO) · RID: "+r.data.rid+" ("+r.data.ridPct+"%) · KO esclusi: "+r.data.totals.ko+". Verifica e premi Aggiungi.",false);
         renderSyncPanel(r.data);
       })
       .catch(function(err){ showMsg("Impossibile contattare Supermoney: "+err.message,true); })
