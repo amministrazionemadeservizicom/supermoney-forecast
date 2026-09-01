@@ -176,7 +176,7 @@ async function fetchPSV(token, intervalStart, intervalEnd) {
         monthly = csvToMonthly(content, PSV_MWH_TO_SMC);
       }
       if (monthly.length > 0) return { monthly, source: dataName };
-    } catch (_) { continue; }
+    } catch (e) { console.error(`PSV ${dataName}:`, e.message); continue; }
   }
   return { monthly: [], source: null };
 }
