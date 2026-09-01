@@ -67,12 +67,10 @@ function aggregateMonth(csvText) {
   lines.slice(1).filter(l => l.trim()).forEach(line => {
     const cols = parseLine(line);
     const stato = (cols[idx.stato] || "").toLowerCase();
-    const isKo = stato.startsWith("ko");
-    if (!isKo) {
-      total++;
-      const mp = (cols[idx.modalitaPagamento] || "").toLowerCase();
-      if (mp.includes("sdd") || mp.includes("addebito")) rid++;
-    }
+    if (stato.startsWith("ko") || stato.includes("annullat")) return;
+    total++;
+    const mp = (cols[idx.modalitaPagamento] || "").toLowerCase();
+    if (mp.includes("sdd") || mp.includes("addebito")) rid++;
   });
 
   return { total, rid };

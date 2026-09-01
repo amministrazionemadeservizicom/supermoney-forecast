@@ -468,7 +468,7 @@
       <div class="sync-row">
         <button type="button" class="sync-btn" id="sync-btn">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-          Aggiorna ora
+          Forza aggiornamento
         </button>
         <span class="sync-hint" id="sync-hint">Auto-sync ogni 20 min · ultima: mai</span>
       </div>
@@ -889,25 +889,25 @@ function renderMonthlyHistory(unit){
   function pct(n,d){ return d?(n/d*100).toFixed(1)+"%":"—"; }
 
   function renderSyncPanel(data){
-    var t=data.totals;
     var html='<div class="sync-summary">'+
-      '<div class="sync-kpi"><div class="sk-label">Totale</div><div class="sk-val">'+t.total+'</div></div>'+
-      '<div class="sync-kpi ok"><div class="sk-label">Attivati (OK)</div><div class="sk-val">'+t.ok+'</div></div>'+
-      '<div class="sync-kpi prog"><div class="sk-label">In lavorazione</div><div class="sk-val">'+t.progress+'</div></div>'+
-      '<div class="sync-kpi ko"><div class="sk-label">KO</div><div class="sk-val">'+t.ko+'</div></div>'+
+      '<div class="sync-kpi"><div class="sk-label">Contratti</div><div class="sk-val">'+data.value+'</div></div>'+
+      '<div class="sync-kpi ok"><div class="sk-label">RID</div><div class="sk-val">'+(data.rid||0)+'</div></div>'+
       '</div>';
     var fornitori=Object.keys(data.byFornitore).sort(function(a,b){ return data.byFornitore[b].total-data.byFornitore[a].total; });
     if(fornitori.length){
       html+='<span class="sync-section-label">Per gestore</span>';
-      html+='<table class="sync-tbl"><thead><tr><th>Gestore</th><th class="r">Tot</th><th class="r">OK</th><th class="r">Progress</th><th class="r">KO</th><th class="r">% OK</th></tr></thead><tbody>';
-      fornitori.forEach(function(f){ var r=data.byFornitore[f]; html+='<tr><td>'+escapeHtml(f)+'</td><td class="n r">'+r.total+'</td><td class="n r ok-c">'+r.ok+'</td><td class="n r">'+r.progress+'</td><td class="n r ko-c">'+r.ko+'</td><td class="n r">'+pct(r.ok,r.total)+'</td></tr>'; });
+      html+='<table class="sync-tbl"><thead><tr><th>Gestore</th><th class="r">Contratti</th><th class="r">RID</th><th class="r">% RID</th></tr></thead><tbody>';
+      fornitori.forEach(function(f){
+        var r=data.byFornitore[f];
+        html+='<tr><td>'+escapeHtml(f)+'</td><td class="n r">'+r.total+'</td><td class="n r">'+r.rid+'</td><td class="n r">'+pct(r.rid,r.total)+'</td></tr>';
+      });
       html+='</tbody></table>';
     }
     var tipi=Object.keys(data.byTipoFornitura).sort(function(a,b){ return data.byTipoFornitura[b].total-data.byTipoFornitura[a].total; });
     if(tipi.length){
       html+='<span class="sync-section-label">Per tipo fornitura</span>';
-      html+='<table class="sync-tbl"><thead><tr><th>Tipo</th><th class="r">Tot</th><th class="r">OK</th><th class="r">Progress</th><th class="r">KO</th></tr></thead><tbody>';
-      tipi.forEach(function(tf){ var r=data.byTipoFornitura[tf]; html+='<tr><td>'+escapeHtml(tf)+'</td><td class="n r">'+r.total+'</td><td class="n r ok-c">'+r.ok+'</td><td class="n r">'+r.progress+'</td><td class="n r ko-c">'+r.ko+'</td></tr>'; });
+      html+='<table class="sync-tbl"><thead><tr><th>Tipo</th><th class="r">Contratti</th></tr></thead><tbody>';
+      tipi.forEach(function(tf){ var r=data.byTipoFornitura[tf]; html+='<tr><td>'+escapeHtml(tf)+'</td><td class="n r">'+r.total+'</td></tr>'; });
       html+='</tbody></table>';
     }
     document.getElementById("sync-panel").innerHTML=html;
@@ -948,16 +948,16 @@ function renderMonthlyHistory(unit){
         render();
         var now=new Date().toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"});
         updateSyncHint(now);
+        renderSyncPanel(r.data); // sempre visibile, anche su auto-sync
         if(!silent){
           showMsg(r.data.value+" contratti attivi da inizio mese · RID: "+r.data.rid+" ("+r.data.ridPct+"%) · KO esclusi: "+r.data.totals.ko+".",false);
-          renderSyncPanel(r.data);
         }
       })
       .catch(function(err){
         if(!silent) showMsg("Impossibile contattare Supermoney: "+err.message,true);
       })
       .finally(function(){
-        if(!silent){ btn.disabled=false; btn.innerHTML=SYNC_ICON+" Sincronizza da Supermoney"; }
+        if(!silent){ btn.disabled=false; btn.innerHTML=SYNC_ICON+" Forza aggiornamento"; }
       });
   }
 

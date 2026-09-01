@@ -92,11 +92,9 @@ function parseCSVRows(csvText) {
     });
 }
 
-function classifyStato(stato) {
-  const s = stato.toLowerCase();
-  if (s.startsWith("ko")) return "ko";
-  if (s === "contratto attivato") return "ok";
-  return "progress";
+function isExcluded(stato) {
+  const s = (stato || "").toLowerCase();
+  return s.startsWith("ko") || s.includes("annullat");
 }
 
 function isRid(modalitaPagamento) {
@@ -105,39 +103,33 @@ function isRid(modalitaPagamento) {
 }
 
 function buildBreakdown(rows) {
-  const totals = { total: 0, ok: 0, progress: 0, ko: 0 };
+  let total = 0;
   const byFornitore = {};
   const byTipoFornitura = {};
   let rid = 0;
 
   for (const row of rows) {
-    const type = classifyStato(row.stato);
-    totals.total++;
-    totals[type]++;
+    if (isExcluded(row.stato)) continue; // ignora KO e annullati
 
-    const isActive = type !== "ko";
+    total++;
     const isRidPayment = isRid(row.modalitaPagamento);
-
-    // RID: conta solo tra i contratti attivi (non KO)
-    if (isActive && isRidPayment) rid++;
+    if (isRidPayment) rid++;
 
     const f = row.fornitore || "Altro";
-    if (!byFornitore[f]) byFornitore[f] = { total: 0, ok: 0, progress: 0, ko: 0, active: 0, rid: 0 };
+    if (!byFornitore[f]) byFornitore[f] = { total: 0, rid: 0 };
     byFornitore[f].total++;
-    byFornitore[f][type]++;
-    if (isActive) byFornitore[f].active++;
-    if (isActive && isRidPayment) byFornitore[f].rid++;
+    if (isRidPayment) byFornitore[f].rid++;
 
     const tf = row.tipoFornitura || "Altro";
-    if (!byTipoFornitura[tf]) byTipoFornitura[tf] = { total: 0, ok: 0, progress: 0, ko: 0 };
+    if (!byTipoFornitura[tf]) byTipoFornitura[tf] = { total: 0 };
     byTipoFornitura[tf].total++;
-    byTipoFornitura[tf][type]++;
   }
 
   const active = totals.ok + totals.progress;
   const ridPct = active > 0 ? ((rid / active) * 100).toFixed(1) : "0.0";
 
-  return { totals, byFornitore, byTipoFornitura, rid, ridPct };
+  const ridPct = total > 0 ? ((rid / total) * 100).toFixed(1) : "0.0";
+  return { total, byFornitore, byTipoFornitura, rid, ridPct };
 }
 
 const RESPONSE_HEADERS = {
@@ -196,23 +188,19 @@ exports.handler = async function (event) {
         headers: RESPONSE_HEADERS,
         body: JSON.stringify({
           from, to,
-          value: 0,
-          totals: { total: 0, ok: 0, progress: 0, ko: 0 },
-          byFornitore: {},
+          value: 0, rid: 0, ridPct: "0.0",
+          byFornitore: {}, byFornitoreActive: {},
           byTipoFornitura: {},
         }),
       };
     }
 
-    const { totals, byFornitore, byTipoFornitura, rid, ridPct } = buildBreakdown(rows);
+    const { total, byFornitore, byTipoFornitura, rid, ridPct } = buildBreakdown(rows);
 
-    // value = contratti ATTIVI (non KO) — escludi annullati/KO
-    const active = totals.ok + totals.progress;
-
-    // byFornitore per il frontend: solo active count per provider (per forecast)
-    const byFornitoreActive = {};
+    // byFornitore per il frontend: solo count per provider
+    const byFornitoreCount = {};
     for (const [f, r] of Object.entries(byFornitore)) {
-      byFornitoreActive[f] = r.active;
+      byFornitoreCount[f] = r.total;
     }
 
     return {
@@ -220,12 +208,11 @@ exports.handler = async function (event) {
       headers: RESPONSE_HEADERS,
       body: JSON.stringify({
         from, to,
-        value: active,
+        value: total,
         rid,
         ridPct,
-        totals,
-        byFornitore,         // dettaglio completo per sync panel
-        byFornitoreActive,   // solo active per forecast/storico
+        byFornitore,
+        byFornitoreActive: byFornitoreCount,
         byTipoFornitura,
       }),
     };
