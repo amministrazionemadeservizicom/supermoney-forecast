@@ -1268,8 +1268,22 @@ function renderMonthlyHistory(unit){
           }
           // Scadenza: solo offerte ancora attive
           if(iScad>=0 && row[iScad]){
-            var scad=row[iScad] instanceof Date?row[iScad]:new Date(row[iScad]);
-            if(!isNaN(scad)&&scad<today) return;
+            var scadRaw=row[iScad];
+            var scad;
+            if(scadRaw instanceof Date){
+              scad=scadRaw;
+            } else {
+              var s=String(scadRaw).trim();
+              // Supporta DD/MM/YYYY e DD/MM/YY (formato italiano)
+              var dm=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+              if(dm){
+                var sy=parseInt(dm[3]); if(sy<100) sy+=2000;
+                scad=new Date(sy,parseInt(dm[2])-1,parseInt(dm[1]));
+              } else {
+                scad=new Date(s);
+              }
+            }
+            if(!isNaN(scad.getTime())&&scad<today) return;
           }
 
           var utenze=iUtenze>=0?String(row[iUtenze]||"").toLowerCase():"";
