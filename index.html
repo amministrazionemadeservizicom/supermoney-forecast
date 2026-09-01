@@ -676,15 +676,28 @@
       }
     }
 
-    // --- Media ponderata ultimi 3 giorni ---
-    // Dà più peso ai giorni recenti (riflette meglio l'andamento corrente)
-    var wDaily     = clip0(weightedRecent(vals));
-    var projW      = wDaily !== null ? Math.round(soFar + wDaily * remaining) : null;
+    // --- Media ponderata mesi precedenti (pesi 1-2-3 sul tasso giornaliero lavorativo) ---
+    var past       = pastMonthlyTotals();
+    var projW      = null;
+    var wNote      = "Nessun mese precedente disponibile ancora.";
+    if(past.length){
+      var recent = past.slice(-3);
+      var wts    = recent.length===1?[1]:recent.length===2?[1,2]:[1,2,3];
+      var wRate=0, wTot=0;
+      recent.forEach(function(m,i){
+        var rate = m.workdays>0 ? m.total/m.workdays : 0;
+        wRate += rate*wts[i]; wTot += wts[i];
+      });
+      var wDailyRate = wTot>0 ? wRate/wTot : 0;
+      projW = Math.round(soFar + wDailyRate * remaining);
+      wNote = "Pesi 1-2-3 sul tasso giornaliero (gg lavorativi) degli ultimi "+recent.length+
+              " mes"+(recent.length===1?"e":"i")+". Tasso: "+fmtNum(wDailyRate,1)+" "+unit+"/giorno.";
+    }
 
     grid.appendChild(statCard({
-      color:"var(--accent)", label:"Media semplice",
+      color:"var(--accent)", label:"Media semplice (mese corrente)",
       value:projAvg, unit:unit,
-      note: n ? "Media: "+fmtNum(avgDaily)+" "+unit+"/giorno · stima residuo: +"+fmtNum(projAvg!==null?projAvg-soFar:null,0) : "Inserisci almeno un dato.",
+      note: n ? "Tasso: "+fmtNum(avgDaily)+" "+unit+"/giorno · stima residuo: +"+fmtNum(projAvg!==null?projAvg-soFar:null,0) : "Inserisci almeno un dato.",
       pill:null
     }));
     grid.appendChild(statCard({
@@ -693,9 +706,9 @@
       note:trendNote, pill:trendPill
     }));
     grid.appendChild(statCard({
-      color:"var(--series-weighted)", label:"Media pond. (ult. 3 giorni)",
+      color:"var(--series-weighted)", label:"Media pond. mesi precedenti",
       value:projW, unit:unit,
-      note: n>=3 ? "Pesi 1-2-3: i giorni più recenti pesano di più." : n ? "Con meno di 3 giorni i pesi si adattano." : "Inserisci almeno un dato.",
+      note:wNote,
       pill:null
     }));
 
