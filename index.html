@@ -386,6 +386,17 @@
   .sync-tbl td.n{font-family:"IBM Plex Mono",monospace;}
   .sync-tbl td.ok-c{color:var(--good);}
   .sync-tbl td.ko-c{color:var(--bad);}
+
+  /* --- period tabs --- */
+  .period-tabs{display:flex; gap:.4rem; margin-bottom:1rem; flex-wrap:wrap;}
+  .tab-btn{
+    background:transparent; color:var(--muted);
+    border:1px solid var(--line); padding:.35rem .85rem;
+    border-radius:6px; font-family:inherit; font-size:.82rem;
+    font-weight:500; cursor:pointer;
+  }
+  .tab-btn.active{background:var(--accent); color:var(--accent-contrast); border-color:var(--accent);}
+  .tab-btn:hover:not(.active){color:var(--ink); border-color:var(--ink);}
 </style>
 </head>
 <body>
@@ -430,8 +441,18 @@
   </section>
 
   <section>
-    <h2 class="section-title">Proiezione per il prossimo giorno</h2>
+    <h2 class="section-title" id="forecast-title">Proiezione per il prossimo giorno</h2>
+    <div class="period-tabs" role="tablist">
+      <button class="tab-btn active" data-period="daily" role="tab">Giornaliero</button>
+      <button class="tab-btn" data-period="weekly" role="tab">Settimanale</button>
+      <button class="tab-btn" data-period="monthly" role="tab">Mensile</button>
+    </div>
     <div class="stat-grid" id="stat-grid"></div>
+  </section>
+
+  <section id="provider-section" style="display:none;">
+    <h2 class="section-title">Previsione per gestore</h2>
+    <div id="provider-breakdown"></div>
   </section>
 
   <section>
@@ -458,6 +479,8 @@
   "use strict";
 
   var STORAGE_KEY = "produzione-forecast-v1";
+  var currentPeriod = "daily"; // "daily" | "weekly" | "monthly"
+  var pendingSyncData = null;  // { date, byFornitore } da ultima sincronizzazione
 
   function todayISO(){
     var d = new Date();
@@ -468,499 +491,372 @@
   function loadState(){
     try{
       var raw = localStorage.getItem(STORAGE_KEY);
-      if(!raw) return { entries: [], unit: "unità" };
+      if(!raw) return { entries:[], unit:"unità", byFornitore:{} };
       var parsed = JSON.parse(raw);
-      if(!parsed || !Array.isArray(parsed.entries)) return { entries: [], unit: "unità" };
+      if(!parsed || !Array.isArray(parsed.entries)) return { entries:[], unit:"unità", byFornitore:{} };
       if(typeof parsed.unit !== "string" || !parsed.unit) parsed.unit = "unità";
+      if(!parsed.byFornitore || typeof parsed.byFornitore !== "object" || Array.isArray(parsed.byFornitore)) parsed.byFornitore = {};
       return parsed;
-    }catch(e){
-      return { entries: [], unit: "unità" };
-    }
+    }catch(e){ return { entries:[], unit:"unità", byFornitore:{} }; }
   }
 
-  function saveState(state){
-    try{
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    }catch(e){
-      showMsg("Impossibile salvare: local storage non disponibile in questo browser.", true);
-    }
+  function saveState(st){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(st)); }
+    catch(e){ showMsg("Impossibile salvare: local storage non disponibile.", true); }
   }
 
   var state = loadState();
   var editingDate = null;
 
-  // ---------- math ----------
-
-  function sortedEntries(){
-    return state.entries.slice().sort(function(a,b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+  // ---------- ISO week ----------
+  function isoWeekOf(dateStr){
+    var d = new Date(dateStr + "T00:00:00");
+    var tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    tmp.setUTCDate(tmp.getUTCDate() + 4 - (tmp.getUTCDay() || 7));
+    var y = tmp.getUTCFullYear();
+    var jan1 = new Date(Date.UTC(y, 0, 1));
+    var w = Math.ceil(((tmp - jan1) / 86400000 + 1) / 7);
+    return y + "-W" + String(w).padStart(2,"0");
   }
+  function weekLabel(key){ var p=key.split("-W"); return "Sett."+parseInt(p[1])+"/"+p[0]; }
+  function monthLabel(key){ return new Date(key+"-01T00:00:00").toLocaleDateString("it-IT",{month:"short",year:"2-digit"}); }
 
-  function simpleAverage(vals){
-    if(vals.length === 0) return null;
-    var sum = 0;
-    for(var i=0;i<vals.length;i++) sum += vals[i];
-    return sum / vals.length;
-  }
-
-  function linearTrend(vals){
-    var n = vals.length;
-    if(n < 2) return null;
-    var sumX=0,sumY=0,sumXY=0,sumXX=0;
-    for(var i=0;i<n;i++){
-      sumX += i;
-      sumY += vals[i];
-      sumXY += i*vals[i];
-      sumXX += i*i;
+  // ---------- aggregation ----------
+  function aggregated(entries, period){
+    if(period === "daily"){
+      return entries.map(function(e){
+        return { key:e.date, label:fmtDateLabel(e.date), value:e.value, bf:state.byFornitore[e.date]||null };
+      });
     }
-    var denom = (n*sumXX - sumX*sumX);
-    if(denom === 0) return null;
-    var slope = (n*sumXY - sumX*sumY) / denom;
-    var intercept = (sumY - slope*sumX) / n;
-    var projection = slope*n + intercept;
-    return { slope: slope, intercept: intercept, projection: projection };
+    var groups = {};
+    entries.forEach(function(e){
+      var key = period==="weekly" ? isoWeekOf(e.date) : e.date.slice(0,7);
+      var label = period==="weekly" ? weekLabel(key) : monthLabel(key);
+      if(!groups[key]) groups[key]={ key:key, label:label, value:0, bf:{} };
+      groups[key].value += e.value;
+      var bf = state.byFornitore[e.date];
+      if(bf) Object.keys(bf).forEach(function(f){ groups[key].bf[f]=(groups[key].bf[f]||0)+bf[f]; });
+    });
+    return Object.values(groups).sort(function(a,b){ return a.key<b.key?-1:1; });
   }
 
+  // ---------- math ----------
+  function sortedEntries(){
+    return state.entries.slice().sort(function(a,b){ return a.date<b.date?-1:a.date>b.date?1:0; });
+  }
+  function simpleAverage(vals){
+    if(!vals.length) return null;
+    return vals.reduce(function(s,v){ return s+v; },0)/vals.length;
+  }
+  function linearTrend(vals){
+    var n=vals.length; if(n<2) return null;
+    var sx=0,sy=0,sxy=0,sxx=0;
+    for(var i=0;i<n;i++){ sx+=i; sy+=vals[i]; sxy+=i*vals[i]; sxx+=i*i; }
+    var den=n*sxx-sx*sx; if(!den) return null;
+    var slope=(n*sxy-sx*sy)/den, int=(sy-slope*sx)/n;
+    return { slope:slope, intercept:int, projection:slope*n+int };
+  }
   function weightedRecent(vals){
-    var n = vals.length;
-    if(n === 0) return null;
-    var last3 = vals.slice(Math.max(0, n-3));
-    var weights = last3.length === 1 ? [1] : last3.length === 2 ? [1,2] : [1,2,3];
-    var sum=0, wsum=0;
-    for(var i=0;i<last3.length;i++){ sum += last3[i]*weights[i]; wsum += weights[i]; }
-    return sum/wsum;
+    if(!vals.length) return null;
+    var last3=vals.slice(Math.max(0,vals.length-3));
+    var w=last3.length===1?[1]:last3.length===2?[1,2]:[1,2,3];
+    var s=0,ws=0;
+    for(var i=0;i<last3.length;i++){ s+=last3[i]*w[i]; ws+=w[i]; }
+    return s/ws;
   }
-
-  function clip0(v){ return v === null ? null : Math.max(0, v); }
+  function clip0(v){ return v===null?null:Math.max(0,v); }
 
   // ---------- formatting ----------
-
-  function fmtNum(v, digits){
-    if(v === null || v === undefined || isNaN(v)) return "—";
-    return v.toLocaleString("it-IT", { minimumFractionDigits: 0, maximumFractionDigits: digits === undefined ? 1 : digits });
+  function fmtNum(v,digits){
+    if(v===null||v===undefined||isNaN(v)) return "—";
+    return v.toLocaleString("it-IT",{minimumFractionDigits:0,maximumFractionDigits:digits===undefined?1:digits});
   }
-
   function fmtDateLabel(iso){
-    var d = new Date(iso + "T00:00:00");
-    return d.toLocaleDateString("it-IT", { day:"2-digit", month:"short" });
+    return new Date(iso+"T00:00:00").toLocaleDateString("it-IT",{day:"2-digit",month:"short"});
+  }
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g,function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; });
   }
 
-  function nextDayISO(iso){
-    var d = new Date(iso + "T00:00:00");
-    d.setDate(d.getDate()+1);
-    var tz = d.getTimezoneOffset() * 60000;
-    return new Date(d - tz).toISOString().slice(0,10);
-  }
+  // ---------- period helpers ----------
+  function periodNextLabel(){ return {daily:"domani",weekly:"pross. sett.",monthly:"pross. mese"}[currentPeriod]; }
+  function periodUnit(){ return {daily:"giorno",weekly:"settimana",monthly:"mese"}[currentPeriod]; }
+  function periodCount(n){ return n+" "+({daily:n===1?"giorno":"giorni",weekly:n===1?"settimana":"settimane",monthly:n===1?"mese":"mesi"}[currentPeriod]); }
 
   // ---------- rendering ----------
-
-  function showMsg(text, isError){
-    var el = document.getElementById("form-msg");
-    el.textContent = text || "";
-    el.className = "form-msg" + (isError ? " error" : "");
+  function showMsg(text,isError){
+    var el=document.getElementById("form-msg");
+    el.textContent=text||"";
+    el.className="form-msg"+(isError?" error":"");
   }
 
   function render(){
-    var entries = sortedEntries();
-    var vals = entries.map(function(e){ return e.value; });
-    var unit = state.unit || "unità";
-
-    renderStats(entries, vals, unit);
-    renderChart(entries, vals, unit);
-    renderTable(entries, unit);
+    var entries=sortedEntries();
+    var unit=state.unit||"unità";
+    var agg=aggregated(entries,currentPeriod);
+    document.getElementById("forecast-title").textContent={
+      daily:"Proiezione per il prossimo giorno",
+      weekly:"Proiezione per la prossima settimana",
+      monthly:"Proiezione per il prossimo mese"
+    }[currentPeriod];
+    renderStats(agg,unit);
+    renderChart(agg,unit);
+    renderTable(entries,unit);
+    renderProviders(agg,unit);
   }
 
-  function renderStats(entries, vals, unit){
-    var grid = document.getElementById("stat-grid");
-    grid.innerHTML = "";
-
-    var avg = clip0(simpleAverage(vals));
-    var trend = linearTrend(vals);
-    var trendProj = trend ? clip0(trend.projection) : null;
-    var weighted = clip0(weightedRecent(vals));
+  function renderStats(agg,unit){
+    var grid=document.getElementById("stat-grid");
+    grid.innerHTML="";
+    var vals=agg.map(function(a){ return a.value; });
+    var avg=clip0(simpleAverage(vals));
+    var trend=linearTrend(vals);
+    var trendProj=trend?clip0(trend.projection):null;
+    var weighted=clip0(weightedRecent(vals));
 
     grid.appendChild(statCard({
-      color: "var(--accent)",
-      label: "Media semplice",
-      value: avg,
-      unit: unit,
-      note: entries.length ? "Media di " + entries.length + " giorni inseriti." : "Aggiungi almeno un dato per calcolarla.",
-      pill: null
+      color:"var(--accent)", label:"Media semplice", value:avg, unit:unit,
+      note:agg.length?"Media di "+periodCount(agg.length)+" inseriti.":"Aggiungi almeno un dato per calcolarla.",
+      pill:null
     }));
 
-    var trendNote;
-    var pill = null;
+    var trendNote,pill=null;
     if(!trend){
-      trendNote = "Servono almeno 2 giorni di dati per calcolare il trend.";
+      trendNote="Servono almeno 2 "+periodUnit()+"i di dati per il trend.";
     } else {
-      var perDay = trend.slope;
-      if(Math.abs(perDay) < (avg || 1) * 0.005){
-        trendNote = "Andamento stabile, variazione trascurabile al giorno.";
-        pill = { cls:"flat", text:"➝ stabile" };
-      } else if(perDay > 0){
-        trendNote = "In crescita di circa " + fmtNum(Math.abs(perDay)) + " " + unit + "/giorno.";
-        pill = { cls:"up", text:"▲ in crescita" };
-      } else {
-        trendNote = "In calo di circa " + fmtNum(Math.abs(perDay)) + " " + unit + "/giorno.";
-        pill = { cls:"down", text:"▼ in calo" };
-      }
+      var per=trend.slope;
+      if(Math.abs(per)<(avg||1)*0.005){ trendNote="Andamento stabile."; pill={cls:"flat",text:"➝ stabile"}; }
+      else if(per>0){ trendNote="In crescita di circa "+fmtNum(Math.abs(per))+" "+unit+"/"+periodUnit()+"."; pill={cls:"up",text:"▲ in crescita"}; }
+      else { trendNote="In calo di circa "+fmtNum(Math.abs(per))+" "+unit+"/"+periodUnit()+"."; pill={cls:"down",text:"▼ in calo"}; }
     }
+    grid.appendChild(statCard({ color:"var(--series-trend)", label:"Trend (regressione lineare)", value:trendProj, unit:unit, note:trendNote, pill:pill }));
     grid.appendChild(statCard({
-      color: "var(--series-trend)",
-      label: "Trend (regressione lineare)",
-      value: trendProj,
-      unit: unit,
-      note: trendNote,
-      pill: pill
-    }));
-
-    grid.appendChild(statCard({
-      color: "var(--series-weighted)",
-      label: "Media ponderata (ultimi 3 gg)",
-      value: weighted,
-      unit: unit,
-      note: entries.length >= 3
-        ? "Pesi 1-2-3: il giorno più recente pesa il triplo del più lontano."
-        : (entries.length === 0 ? "Aggiungi dati per calcolarla." : "Con meno di 3 giorni i pesi si adattano automaticamente."),
-      pill: null
+      color:"var(--series-weighted)", label:"Media ponderata (ultimi 3)", value:weighted, unit:unit,
+      note:agg.length>=3?"Pesi 1-2-3: il periodo più recente pesa il triplo.":(agg.length===0?"Aggiungi dati per calcolarla.":"Con meno di 3 periodi i pesi si adattano."),
+      pill:null
     }));
   }
 
   function statCard(opts){
-    var card = document.createElement("div");
-    card.className = "stat-card";
-
-    var label = document.createElement("div");
-    label.className = "label";
-    var sw = document.createElement("span");
-    sw.className = "swatch";
-    sw.style.background = opts.color;
-    label.appendChild(sw);
-    label.appendChild(document.createTextNode(opts.label));
-    card.appendChild(label);
-
-    var value = document.createElement("div");
-    value.className = "value";
-    value.innerHTML = fmtNum(opts.value) + (opts.value !== null ? '<span class="unit">' + escapeHtml(opts.unit) + '</span>' : "");
-    card.appendChild(value);
-
-    var note = document.createElement("div");
-    note.className = "note";
-    note.textContent = opts.note;
-    card.appendChild(note);
-
-    if(opts.pill){
-      var p = document.createElement("div");
-      p.className = "pill " + opts.pill.cls;
-      p.textContent = opts.pill.text;
-      card.appendChild(p);
-    }
-
+    var card=document.createElement("div"); card.className="stat-card";
+    var lbl=document.createElement("div"); lbl.className="label";
+    var sw=document.createElement("span"); sw.className="swatch"; sw.style.background=opts.color;
+    lbl.appendChild(sw); lbl.appendChild(document.createTextNode(opts.label)); card.appendChild(lbl);
+    var val=document.createElement("div"); val.className="value";
+    val.innerHTML=fmtNum(opts.value)+(opts.value!==null?'<span class="unit">'+escapeHtml(opts.unit)+'</span>':"");
+    card.appendChild(val);
+    var note=document.createElement("div"); note.className="note"; note.textContent=opts.note; card.appendChild(note);
+    if(opts.pill){ var p=document.createElement("div"); p.className="pill "+opts.pill.cls; p.textContent=opts.pill.text; card.appendChild(p); }
     return card;
   }
 
-  function escapeHtml(s){
-    return String(s).replace(/[&<>"']/g, function(c){
-      return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c];
-    });
-  }
-
-  function renderChart(entries, vals, unit){
-    var container = document.getElementById("chart-container");
-    var legend = document.getElementById("chart-legend");
-    legend.innerHTML = "";
-
-    if(entries.length === 0){
-      container.innerHTML = '<div class="empty-state">Nessun dato ancora inserito. Aggiungi il primo valore per vedere il grafico.</div>';
+  function renderChart(agg,unit){
+    var container=document.getElementById("chart-container");
+    var legend=document.getElementById("chart-legend");
+    legend.innerHTML="";
+    if(!agg.length){
+      container.innerHTML='<div class="empty-state">Nessun dato ancora inserito. Aggiungi il primo valore per vedere il grafico.</div>';
       return;
     }
-
-    var avg = clip0(simpleAverage(vals));
-    var trend = linearTrend(vals);
-    var trendProj = trend ? clip0(trend.projection) : null;
-    var weighted = clip0(weightedRecent(vals));
-
-    var W = 760, H = 300;
-    var padL = 54, padR = 20, padT = 20, padB = 40;
-    var chartW = W - padL - padR;
-    var chartH = H - padT - padB;
-
-    var n = entries.length;
-    var slots = n + 1; // + projected day
-    var xStep = slots > 1 ? chartW / (slots - 1) : 0;
-
-    var allVals = vals.slice();
-    if(avg !== null) allVals.push(avg);
-    if(trendProj !== null) allVals.push(trendProj);
-    if(weighted !== null) allVals.push(weighted);
-    var minV = Math.min.apply(null, allVals.concat([0]));
-    var maxV = Math.max.apply(null, allVals);
-    if(maxV === minV) maxV = minV + 1;
-    var pad = (maxV - minV) * 0.12;
-    minV = Math.max(0, minV - pad);
-    maxV = maxV + pad;
-
-    function xAt(i){ return padL + (slots > 1 ? i * xStep : chartW/2); }
-    function yAt(v){ return padT + chartH - ((v - minV) / (maxV - minV)) * chartH; }
-
-    var svg = [];
-    svg.push('<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Grafico andamento produzione e proiezioni">');
-
-    // gridlines
-    var gridLines = 4;
-    for(var g=0; g<=gridLines; g++){
-      var gv = minV + (maxV-minV) * (g/gridLines);
-      var gy = yAt(gv);
+    var vals=agg.map(function(a){ return a.value; });
+    var avg=clip0(simpleAverage(vals)),trend=linearTrend(vals),trendProj=trend?clip0(trend.projection):null,weighted=clip0(weightedRecent(vals));
+    var W=760,H=300,padL=54,padR=20,padT=20,padB=40,chartW=W-padL-padR,chartH=H-padT-padB;
+    var n=agg.length,slots=n+1,xStep=slots>1?chartW/(slots-1):0;
+    var allVals=vals.slice();
+    if(avg!==null) allVals.push(avg); if(trendProj!==null) allVals.push(trendProj); if(weighted!==null) allVals.push(weighted);
+    var minV=Math.min.apply(null,allVals.concat([0])),maxV=Math.max.apply(null,allVals);
+    if(maxV===minV) maxV=minV+1;
+    var pad=(maxV-minV)*0.12; minV=Math.max(0,minV-pad); maxV+=pad;
+    function xAt(i){ return padL+(slots>1?i*xStep:chartW/2); }
+    function yAt(v){ return padT+chartH-((v-minV)/(maxV-minV))*chartH; }
+    var svg=[];
+    svg.push('<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Grafico andamento produzione e proiezioni">');
+    for(var g=0;g<=4;g++){
+      var gv=minV+(maxV-minV)*(g/4),gy=yAt(gv);
       svg.push('<line x1="'+padL+'" y1="'+gy+'" x2="'+(W-padR)+'" y2="'+gy+'" stroke="var(--line)" stroke-width="1"/>');
       svg.push('<text x="'+(padL-10)+'" y="'+(gy+4)+'" text-anchor="end" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--muted)">'+fmtNum(gv,0)+'</text>');
     }
-
-    // simple average reference line (dashed, full width)
-    if(avg !== null){
-      var ay = yAt(avg);
-      svg.push('<line x1="'+padL+'" y1="'+ay+'" x2="'+(W-padR)+'" y2="'+ay+'" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="3 4" opacity="0.75"/>');
-    }
-
-    // actual history line + area
-    var pts = entries.map(function(e,i){ return [xAt(i), yAt(e.value)]; });
-    var linePath = pts.map(function(p,i){ return (i===0?"M":"L") + p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" ");
-    var areaPath = linePath + " L" + pts[pts.length-1][0].toFixed(1) + "," + (padT+chartH) + " L" + pts[0][0].toFixed(1) + "," + (padT+chartH) + " Z";
+    if(avg!==null){ var ay=yAt(avg); svg.push('<line x1="'+padL+'" y1="'+ay+'" x2="'+(W-padR)+'" y2="'+ay+'" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="3 4" opacity="0.75"/>'); }
+    var pts=agg.map(function(a,i){ return [xAt(i),yAt(a.value)]; });
+    var linePath=pts.map(function(p,i){ return (i===0?"M":"L")+p[0].toFixed(1)+","+p[1].toFixed(1); }).join(" ");
+    var areaPath=linePath+" L"+pts[pts.length-1][0].toFixed(1)+","+(padT+chartH)+" L"+pts[0][0].toFixed(1)+","+(padT+chartH)+" Z";
     svg.push('<path d="'+areaPath+'" fill="var(--accent)" opacity="0.08" stroke="none"/>');
     svg.push('<path d="'+linePath+'" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>');
-
-    pts.forEach(function(p,i){
-      var isLast = i === pts.length - 1;
-      svg.push('<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(isLast?4.5:3)+'" fill="var(--paper-raised)" stroke="var(--accent)" stroke-width="2"/>');
-    });
-
-    // trend dashed extension from last actual point to projection
-    if(trend && trendProj !== null){
-      var lastPt = pts[pts.length-1];
-      var projX = xAt(n);
-      var projY = yAt(trendProj);
-      svg.push('<line x1="'+lastPt[0].toFixed(1)+'" y1="'+lastPt[1].toFixed(1)+'" x2="'+projX.toFixed(1)+'" y2="'+projY.toFixed(1)+'" stroke="var(--series-trend)" stroke-width="2" stroke-dasharray="5 4"/>');
-      svg.push('<path d="M'+(projX-5).toFixed(1)+','+projY.toFixed(1)+' L'+projX.toFixed(1)+','+(projY-5).toFixed(1)+' L'+(projX+5).toFixed(1)+','+projY.toFixed(1)+' L'+projX.toFixed(1)+','+(projY+5).toFixed(1)+' Z" fill="var(--series-trend)"/>');
+    pts.forEach(function(p,i){ var isLast=i===pts.length-1; svg.push('<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(isLast?4.5:3)+'" fill="var(--paper-raised)" stroke="var(--accent)" stroke-width="2"/>'); });
+    if(trend&&trendProj!==null){
+      var lp=pts[pts.length-1],px=xAt(n),py=yAt(trendProj);
+      svg.push('<line x1="'+lp[0].toFixed(1)+'" y1="'+lp[1].toFixed(1)+'" x2="'+px.toFixed(1)+'" y2="'+py.toFixed(1)+'" stroke="var(--series-trend)" stroke-width="2" stroke-dasharray="5 4"/>');
+      svg.push('<path d="M'+(px-5).toFixed(1)+','+py.toFixed(1)+' L'+px.toFixed(1)+','+(py-5).toFixed(1)+' L'+(px+5).toFixed(1)+','+py.toFixed(1)+' L'+px.toFixed(1)+','+(py+5).toFixed(1)+' Z" fill="var(--series-trend)"/>');
     }
-
-    // weighted marker at projected day
-    if(weighted !== null){
-      var wx = xAt(n);
-      var wy = yAt(weighted);
-      svg.push('<circle cx="'+wx.toFixed(1)+'" cy="'+wy.toFixed(1)+'" r="5.5" fill="var(--series-weighted)" stroke="var(--paper-raised)" stroke-width="2"/>');
-    }
-
-    // x axis labels (thin out if many entries)
-    var labelEvery = Math.max(1, Math.ceil(n / 8));
-    entries.forEach(function(e,i){
-      if(i % labelEvery === 0 || i === n-1){
-        svg.push('<text x="'+xAt(i).toFixed(1)+'" y="'+(H-14)+'" text-anchor="middle" font-size="10.5" font-family="IBM Plex Sans, sans-serif" fill="var(--muted)">'+fmtDateLabel(e.date)+'</text>');
-      }
-    });
-    svg.push('<text x="'+xAt(n).toFixed(1)+'" y="'+(H-14)+'" text-anchor="middle" font-size="10.5" font-weight="600" font-family="IBM Plex Sans, sans-serif" fill="var(--ink)">domani</text>');
-
+    if(weighted!==null){ var wx=xAt(n),wy=yAt(weighted); svg.push('<circle cx="'+wx.toFixed(1)+'" cy="'+wy.toFixed(1)+'" r="5.5" fill="var(--series-weighted)" stroke="var(--paper-raised)" stroke-width="2"/>'); }
+    var labelEvery=Math.max(1,Math.ceil(n/8));
+    agg.forEach(function(a,i){ if(i%labelEvery===0||i===n-1) svg.push('<text x="'+xAt(i).toFixed(1)+'" y="'+(H-14)+'" text-anchor="middle" font-size="10.5" font-family="IBM Plex Sans, sans-serif" fill="var(--muted)">'+escapeHtml(a.label)+'</text>'); });
+    svg.push('<text x="'+xAt(n).toFixed(1)+'" y="'+(H-14)+'" text-anchor="middle" font-size="10.5" font-weight="600" font-family="IBM Plex Sans, sans-serif" fill="var(--ink)">'+periodNextLabel()+'</text>');
     svg.push('</svg>');
-    container.innerHTML = svg.join("");
-
-    legend.innerHTML =
-      '<span class="legend-item"><span class="legend-swatch" style="background:var(--accent)"></span>Storico</span>' +
-      '<span class="legend-item"><span class="legend-swatch" style="background:var(--accent); opacity:.6; height:0; border-top:2px dashed var(--accent);"></span>Media semplice</span>' +
-      '<span class="legend-item"><span class="legend-swatch" style="background:var(--series-trend); height:0; border-top:2px dashed var(--series-trend);"></span>Trend lineare</span>' +
-      '<span class="legend-item"><span class="legend-dot" style="background:var(--series-weighted)"></span>Media ponderata (3gg)</span>';
+    container.innerHTML=svg.join("");
+    legend.innerHTML=
+      '<span class="legend-item"><span class="legend-swatch" style="background:var(--accent)"></span>Storico</span>'+
+      '<span class="legend-item"><span class="legend-swatch" style="background:var(--accent);opacity:.6;height:0;border-top:2px dashed var(--accent);"></span>Media semplice</span>'+
+      '<span class="legend-item"><span class="legend-swatch" style="background:var(--series-trend);height:0;border-top:2px dashed var(--series-trend);"></span>Trend lineare</span>'+
+      '<span class="legend-item"><span class="legend-dot" style="background:var(--series-weighted)"></span>Media pond. (3)</span>';
   }
 
-  function renderTable(entries, unit){
-    var wrap = document.getElementById("table-wrap");
-    if(entries.length === 0){
-      wrap.innerHTML = '<div class="empty-state">Nessun inserimento ancora.</div>';
-      return;
+  function renderProviders(agg,unit){
+    var section=document.getElementById("provider-section");
+    var providers=Object.keys(agg.reduce(function(acc,a){ if(a.bf) Object.keys(a.bf).forEach(function(f){ acc[f]=true; }); return acc; },{})).sort();
+    if(!providers.length){ section.style.display="none"; return; }
+    section.style.display="";
+    function fcast(vals){
+      var avg=clip0(simpleAverage(vals)),trend=linearTrend(vals),w=clip0(weightedRecent(vals));
+      return '<td class="num">'+fmtNum(avg)+'</td><td class="num">'+(trend?fmtNum(clip0(trend.projection)):"—")+'</td><td class="num">'+fmtNum(w)+'</td>';
     }
-    var reversed = entries.slice().reverse();
-    var html = '<table><thead><tr><th>Data</th><th>Produzione ('+escapeHtml(unit)+')</th><th></th></tr></thead><tbody>';
-    reversed.forEach(function(e){
-      html += '<tr data-date="'+e.date+'">' +
-        '<td>'+fmtDateLabel(e.date)+' <span style="color:var(--muted); font-size:.78rem;">('+e.date+')</span></td>' +
-        '<td class="num">'+fmtNum(e.value)+'</td>' +
-        '<td class="actions"><button data-action="edit" data-date="'+e.date+'">Modifica</button><button data-action="delete" data-date="'+e.date+'">Elimina</button></td>' +
-        '</tr>';
+    var html='<div class="table-wrap"><table><thead><tr>'+
+      '<th>Gestore</th><th class="num">Media semplice</th><th class="num">Trend lineare</th><th class="num">Media pond. (3)</th>'+
+      '</tr></thead><tbody>';
+    html+='<tr><td><strong>Totale complessivo</strong></td>'+fcast(agg.map(function(a){ return a.value; }))+'</tr>';
+    providers.forEach(function(f){
+      var vals=agg.map(function(a){ return (a.bf&&a.bf[f])||0; });
+      if(vals.every(function(v){ return v===0; })) return;
+      html+='<tr><td>'+escapeHtml(f)+'</td>'+fcast(vals)+'</tr>';
     });
-    html += '</tbody></table>';
-    wrap.innerHTML = html;
+    html+='</tbody></table></div>';
+    document.getElementById("provider-breakdown").innerHTML=html;
+  }
 
+  function renderTable(entries,unit){
+    var wrap=document.getElementById("table-wrap");
+    if(!entries.length){ wrap.innerHTML='<div class="empty-state">Nessun inserimento ancora.</div>'; return; }
+    var html='<table><thead><tr><th>Data</th><th>Produzione ('+escapeHtml(unit)+')</th><th></th></tr></thead><tbody>';
+    entries.slice().reverse().forEach(function(e){
+      html+='<tr data-date="'+e.date+'"><td>'+fmtDateLabel(e.date)+' <span style="color:var(--muted);font-size:.78rem;">('+e.date+')</span></td>'+
+        '<td class="num">'+fmtNum(e.value)+'</td>'+
+        '<td class="actions"><button data-action="edit" data-date="'+e.date+'">Modifica</button><button data-action="delete" data-date="'+e.date+'">Elimina</button></td></tr>';
+    });
+    html+='</tbody></table>';
+    wrap.innerHTML=html;
     wrap.querySelectorAll("button[data-action]").forEach(function(btn){
-      btn.addEventListener("click", function(){
-        var d = btn.getAttribute("data-date");
-        if(btn.getAttribute("data-action") === "edit"){
-          startEdit(d);
-        } else {
-          if(confirm("Eliminare il dato del " + d + "?")){
-            deleteEntry(d);
-          }
-        }
+      btn.addEventListener("click",function(){
+        var d=btn.getAttribute("data-date");
+        if(btn.getAttribute("data-action")==="edit"){ startEdit(d); }
+        else{ if(confirm("Eliminare il dato del "+d+"?")){ deleteEntry(d); } }
       });
     });
   }
 
   // ---------- actions ----------
-
-  function upsertEntry(date, value){
-    var idx = state.entries.findIndex(function(e){ return e.date === date; });
-    if(idx >= 0){
-      state.entries[idx].value = value;
-    } else {
-      state.entries.push({ date: date, value: value });
+  function upsertEntry(date,value){
+    var idx=state.entries.findIndex(function(e){ return e.date===date; });
+    if(idx>=0){ state.entries[idx].value=value; } else { state.entries.push({date:date,value:value}); }
+    if(pendingSyncData&&pendingSyncData.date===date){
+      state.byFornitore[date]=pendingSyncData.byFornitore;
+      pendingSyncData=null;
     }
-    saveState(state);
-    render();
+    saveState(state); render();
   }
-
   function deleteEntry(date){
-    state.entries = state.entries.filter(function(e){ return e.date !== date; });
+    state.entries=state.entries.filter(function(e){ return e.date!==date; });
+    delete state.byFornitore[date];
     saveState(state);
-    if(editingDate === date) resetForm();
+    if(editingDate===date) resetForm();
     render();
   }
-
   function startEdit(date){
-    var e = state.entries.find(function(e){ return e.date === date; });
+    var e=state.entries.find(function(e){ return e.date===date; });
     if(!e) return;
-    editingDate = date;
-    document.getElementById("date-input").value = date;
-    document.getElementById("value-input").value = e.value;
-    document.getElementById("submit-btn").textContent = "Salva modifica";
-    document.getElementById("cancel-edit-btn").style.display = "inline-block";
-    showMsg("");
-    document.getElementById("value-input").focus();
+    editingDate=date;
+    document.getElementById("date-input").value=date;
+    document.getElementById("value-input").value=e.value;
+    document.getElementById("submit-btn").textContent="Salva modifica";
+    document.getElementById("cancel-edit-btn").style.display="inline-block";
+    showMsg(""); document.getElementById("value-input").focus();
   }
-
   function resetForm(){
-    editingDate = null;
+    editingDate=null;
     document.getElementById("entry-form").reset();
-    document.getElementById("date-input").value = todayISO();
-    document.getElementById("submit-btn").textContent = "Aggiungi";
-    document.getElementById("cancel-edit-btn").style.display = "none";
+    document.getElementById("date-input").value=todayISO();
+    document.getElementById("submit-btn").textContent="Aggiungi";
+    document.getElementById("cancel-edit-btn").style.display="none";
   }
 
   // ---------- init ----------
+  document.getElementById("date-input").value=todayISO();
+  document.getElementById("unit-input").value=state.unit||"unità";
 
-  document.getElementById("date-input").value = todayISO();
-  document.getElementById("unit-input").value = state.unit || "unità";
-
-  document.getElementById("entry-form").addEventListener("submit", function(ev){
+  document.getElementById("entry-form").addEventListener("submit",function(ev){
     ev.preventDefault();
-    var dateVal = document.getElementById("date-input").value;
-    var numVal = parseFloat(document.getElementById("value-input").value);
-    if(!dateVal){ showMsg("Inserisci una data valida.", true); return; }
-    if(isNaN(numVal) || numVal < 0){ showMsg("Inserisci un valore di produzione valido (>= 0).", true); return; }
-    var wasEditing = !!editingDate;
-    upsertEntry(dateVal, numVal);
-    showMsg(wasEditing ? "Dato del " + dateVal + " aggiornato." : "Dato del " + dateVal + " aggiunto.");
+    var dateVal=document.getElementById("date-input").value;
+    var numVal=parseFloat(document.getElementById("value-input").value);
+    if(!dateVal){ showMsg("Inserisci una data valida.",true); return; }
+    if(isNaN(numVal)||numVal<0){ showMsg("Inserisci un valore >= 0.",true); return; }
+    var wasEditing=!!editingDate;
+    upsertEntry(dateVal,numVal);
+    showMsg(wasEditing?"Dato del "+dateVal+" aggiornato.":"Dato del "+dateVal+" aggiunto.");
     resetForm();
   });
-
-  document.getElementById("cancel-edit-btn").addEventListener("click", function(){
-    resetForm();
-    showMsg("");
+  document.getElementById("cancel-edit-btn").addEventListener("click",function(){ resetForm(); showMsg(""); });
+  document.getElementById("unit-input").addEventListener("change",function(){
+    var u=document.getElementById("unit-input").value.trim();
+    state.unit=u||"unità"; saveState(state); render();
   });
 
-  document.getElementById("unit-input").addEventListener("change", function(){
-    var u = document.getElementById("unit-input").value.trim();
-    state.unit = u || "unità";
-    saveState(state);
-    render();
+  // ---------- period tabs ----------
+  document.querySelectorAll(".tab-btn[data-period]").forEach(function(btn){
+    btn.addEventListener("click",function(){
+      currentPeriod=btn.getAttribute("data-period");
+      document.querySelectorAll(".tab-btn[data-period]").forEach(function(b){ b.classList.toggle("active",b===btn); });
+      render();
+    });
   });
 
   render();
 
   // ---------- sync Supermoney ----------
+  var SYNC_ICON='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
 
-  var SYNC_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
-
-  function pct(n, d){ return d ? (n / d * 100).toFixed(1) + "%" : "—"; }
+  function pct(n,d){ return d?(n/d*100).toFixed(1)+"%":"—"; }
 
   function renderSyncPanel(data){
-    var t = data.totals;
-    var html = '<div class="sync-summary">' +
-      '<div class="sync-kpi"><div class="sk-label">Totale</div><div class="sk-val">' + t.total + '</div></div>' +
-      '<div class="sync-kpi ok"><div class="sk-label">Attivati (OK)</div><div class="sk-val">' + t.ok + '</div></div>' +
-      '<div class="sync-kpi prog"><div class="sk-label">In lavorazione</div><div class="sk-val">' + t.progress + '</div></div>' +
-      '<div class="sync-kpi ko"><div class="sk-label">KO</div><div class="sk-val">' + t.ko + '</div></div>' +
+    var t=data.totals;
+    var html='<div class="sync-summary">'+
+      '<div class="sync-kpi"><div class="sk-label">Totale</div><div class="sk-val">'+t.total+'</div></div>'+
+      '<div class="sync-kpi ok"><div class="sk-label">Attivati (OK)</div><div class="sk-val">'+t.ok+'</div></div>'+
+      '<div class="sync-kpi prog"><div class="sk-label">In lavorazione</div><div class="sk-val">'+t.progress+'</div></div>'+
+      '<div class="sync-kpi ko"><div class="sk-label">KO</div><div class="sk-val">'+t.ko+'</div></div>'+
       '</div>';
-
-    var fornitori = Object.keys(data.byFornitore).sort(function(a,b){
-      return data.byFornitore[b].total - data.byFornitore[a].total;
-    });
+    var fornitori=Object.keys(data.byFornitore).sort(function(a,b){ return data.byFornitore[b].total-data.byFornitore[a].total; });
     if(fornitori.length){
-      html += '<span class="sync-section-label">Per gestore</span>';
-      html += '<table class="sync-tbl"><thead><tr><th>Gestore</th><th class="r">Tot</th><th class="r">OK</th><th class="r">Progress</th><th class="r">KO</th><th class="r">% OK</th></tr></thead><tbody>';
-      fornitori.forEach(function(f){
-        var r = data.byFornitore[f];
-        html += '<tr><td>' + escapeHtml(f) + '</td>' +
-          '<td class="n r">' + r.total + '</td>' +
-          '<td class="n r ok-c">' + r.ok + '</td>' +
-          '<td class="n r">' + r.progress + '</td>' +
-          '<td class="n r ko-c">' + r.ko + '</td>' +
-          '<td class="n r">' + pct(r.ok, r.total) + '</td></tr>';
-      });
-      html += '</tbody></table>';
+      html+='<span class="sync-section-label">Per gestore</span>';
+      html+='<table class="sync-tbl"><thead><tr><th>Gestore</th><th class="r">Tot</th><th class="r">OK</th><th class="r">Progress</th><th class="r">KO</th><th class="r">% OK</th></tr></thead><tbody>';
+      fornitori.forEach(function(f){ var r=data.byFornitore[f]; html+='<tr><td>'+escapeHtml(f)+'</td><td class="n r">'+r.total+'</td><td class="n r ok-c">'+r.ok+'</td><td class="n r">'+r.progress+'</td><td class="n r ko-c">'+r.ko+'</td><td class="n r">'+pct(r.ok,r.total)+'</td></tr>'; });
+      html+='</tbody></table>';
     }
-
-    var tipi = Object.keys(data.byTipoFornitura).sort(function(a,b){
-      return data.byTipoFornitura[b].total - data.byTipoFornitura[a].total;
-    });
+    var tipi=Object.keys(data.byTipoFornitura).sort(function(a,b){ return data.byTipoFornitura[b].total-data.byTipoFornitura[a].total; });
     if(tipi.length){
-      html += '<span class="sync-section-label">Per tipo fornitura</span>';
-      html += '<table class="sync-tbl"><thead><tr><th>Tipo</th><th class="r">Tot</th><th class="r">OK</th><th class="r">Progress</th><th class="r">KO</th></tr></thead><tbody>';
-      tipi.forEach(function(tf){
-        var r = data.byTipoFornitura[tf];
-        html += '<tr><td>' + escapeHtml(tf) + '</td>' +
-          '<td class="n r">' + r.total + '</td>' +
-          '<td class="n r ok-c">' + r.ok + '</td>' +
-          '<td class="n r">' + r.progress + '</td>' +
-          '<td class="n r ko-c">' + r.ko + '</td></tr>';
-      });
-      html += '</tbody></table>';
+      html+='<span class="sync-section-label">Per tipo fornitura</span>';
+      html+='<table class="sync-tbl"><thead><tr><th>Tipo</th><th class="r">Tot</th><th class="r">OK</th><th class="r">Progress</th><th class="r">KO</th></tr></thead><tbody>';
+      tipi.forEach(function(tf){ var r=data.byTipoFornitura[tf]; html+='<tr><td>'+escapeHtml(tf)+'</td><td class="n r">'+r.total+'</td><td class="n r ok-c">'+r.ok+'</td><td class="n r">'+r.progress+'</td><td class="n r ko-c">'+r.ko+'</td></tr>'; });
+      html+='</tbody></table>';
     }
-
-    var panel = document.getElementById("sync-panel");
-    panel.innerHTML = html;
+    document.getElementById("sync-panel").innerHTML=html;
   }
 
-  document.getElementById("sync-btn").addEventListener("click", function(){
-    var btn = document.getElementById("sync-btn");
-    var panel = document.getElementById("sync-panel");
-    var dateVal = document.getElementById("date-input").value || todayISO();
-
-    btn.disabled = true;
-    btn.textContent = "Sincronizzazione…";
-    panel.innerHTML = "";
-    showMsg("");
-
-    fetch("/.netlify/functions/get-produzione?date=" + dateVal)
-      .then(function(res){ return res.json().then(function(d){ return { ok: res.ok, data: d }; }); })
+  document.getElementById("sync-btn").addEventListener("click",function(){
+    var btn=document.getElementById("sync-btn");
+    var panel=document.getElementById("sync-panel");
+    var dateVal=document.getElementById("date-input").value||todayISO();
+    btn.disabled=true; btn.textContent="Sincronizzazione…"; panel.innerHTML=""; showMsg("");
+    fetch("/.netlify/functions/get-produzione?date="+dateVal)
+      .then(function(res){ return res.json().then(function(d){ return {ok:res.ok,data:d}; }); })
       .then(function(r){
-        if(!r.ok){
-          showMsg((r.data && r.data.error) || "Errore Supermoney.", true);
-          return;
-        }
-        if(r.data.totals.total === 0){
-          showMsg("Nessun contratto trovato su Supermoney per il " + dateVal + ".", false);
-          return;
-        }
-        document.getElementById("value-input").value = r.data.value;
-        showMsg(
-          "Dati Supermoney per il " + dateVal + ": " + r.data.totals.total + " contratti totali " +
-          "(OK: " + r.data.totals.ok + ", progress: " + r.data.totals.progress + ", KO: " + r.data.totals.ko + "). " +
-          "Verifica il valore e premi Aggiungi per salvare.",
-          false
-        );
+        if(!r.ok){ showMsg((r.data&&r.data.error)||"Errore Supermoney.",true); return; }
+        if(r.data.totals.total===0){ showMsg("Nessun contratto trovato su Supermoney per il "+dateVal+".",false); return; }
+        document.getElementById("value-input").value=r.data.value;
+        pendingSyncData={ date:dateVal, byFornitore:r.data.byFornitore };
+        showMsg("Dati Supermoney per il "+dateVal+": "+r.data.totals.total+" contratti (OK: "+r.data.totals.ok+", progress: "+r.data.totals.progress+", KO: "+r.data.totals.ko+"). Verifica e premi Aggiungi per salvare.",false);
         renderSyncPanel(r.data);
       })
-      .catch(function(err){
-        showMsg("Impossibile contattare Supermoney: " + err.message, true);
-      })
-      .finally(function(){
-        btn.disabled = false;
-        btn.innerHTML = SYNC_ICON + " Sincronizza da Supermoney";
-      });
+      .catch(function(err){ showMsg("Impossibile contattare Supermoney: "+err.message,true); })
+      .finally(function(){ btn.disabled=false; btn.innerHTML=SYNC_ICON+" Sincronizza da Supermoney"; });
   });
 
 })();
