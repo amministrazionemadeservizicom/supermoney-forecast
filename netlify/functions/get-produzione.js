@@ -125,9 +125,6 @@ function buildBreakdown(rows) {
     byTipoFornitura[tf].total++;
   }
 
-  const active = totals.ok + totals.progress;
-  const ridPct = active > 0 ? ((rid / active) * 100).toFixed(1) : "0.0";
-
   const ridPct = total > 0 ? ((rid / total) * 100).toFixed(1) : "0.0";
   return { total, byFornitore, byTipoFornitura, rid, ridPct };
 }

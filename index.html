@@ -676,7 +676,7 @@
   // ---------- formatting ----------
   function fmtNum(v,digits){
     if(v===null||v===undefined||isNaN(v)) return "—";
-    return v.toLocaleString("it-IT",{minimumFractionDigits:0,maximumFractionDigits:digits===undefined?1:digits});
+    return v.toLocaleString("it-IT",{minimumFractionDigits:0,maximumFractionDigits:digits===undefined?1:digits,useGrouping:false});
   }
   function fmtDateLabel(iso){
     return new Date(iso+"T00:00:00").toLocaleDateString("it-IT",{day:"2-digit",month:"short"});
@@ -699,6 +699,19 @@
     renderStats(unit);
     renderProviders(unit);
     renderMonthlyHistory(unit);
+    // Mostra pannello gestore dalla cache subito, senza aspettare sync
+    var cm=state.currentMonth;
+    if(cm && cm.total){
+      // Costruisce byFornitore compatibile con renderSyncPanel da qualsiasi cache disponibile
+      var bf=cm.byFornitoreDetail||{};
+      if(!Object.keys(bf).length && cm.byFornitore){
+        // fallback: byFornitore è {Eni:1811,...}, costruiamo {Eni:{total:1811,rid:0},...}
+        Object.keys(cm.byFornitore).forEach(function(f){ bf[f]={total:cm.byFornitore[f],rid:0}; });
+      }
+      if(Object.keys(bf).length){
+        renderSyncPanel({ value:cm.total, rid:cm.rid||0, ridPct:cm.ridPct||"0.0", byFornitore:bf, byTipoFornitura:cm.byTipoFornitura||{} });
+      }
+    }
   }
 
   function renderStats(unit){
@@ -851,9 +864,10 @@ function renderMonthlyHistory(unit){
     section.style.display="";
     var remaining=workdaysRemaining();
     var wdSoFar=cm.workdaysSoFar||workdaysSoFar();
+    var fm=totalFactorMultiplier();
     function projRow(soFarF){
       var rate=wdSoFar>0?soFarF/wdSoFar:0;
-      var proj=Math.round(soFarF+rate*remaining);
+      var proj=Math.round((soFarF+rate*remaining)*fm);
       var pct=cm.total>0?Math.round(soFarF/cm.total*100):0;
       return '<td class="num">'+fmtNum(soFarF,0)+'</td>'+
              '<td class="num">'+fmtNum(proj,0)+'</td>'+
@@ -933,7 +947,8 @@ function renderMonthlyHistory(unit){
           return;
         }
         var ym=currentMonthPrefix();
-        var wdSF=workdaysSoFar();
+        var dataMonth=r.data.from?r.data.from.slice(0,7):ym;
+        var wdSF=dataMonth===ym?workdaysSoFar():workdaysInMonth(dataMonth);
         // Salva snapshot mese corrente
         state.currentMonth={
           ym: ym,
@@ -941,6 +956,8 @@ function renderMonthlyHistory(unit){
           rid: r.data.rid||0,
           ridPct: r.data.ridPct||"0.0",
           byFornitore: r.data.byFornitoreActive||{},
+          byFornitoreDetail: r.data.byFornitore||{},
+          byTipoFornitura: r.data.byTipoFornitura||{},
           workdaysSoFar: wdSF,
           lastSync: new Date().toISOString()
         };
@@ -949,9 +966,7 @@ function renderMonthlyHistory(unit){
         var now=new Date().toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"});
         updateSyncHint(now);
         renderSyncPanel(r.data); // sempre visibile, anche su auto-sync
-        if(!silent){
-          showMsg(r.data.value+" contratti attivi da inizio mese · RID: "+r.data.rid+" ("+r.data.ridPct+"%) · KO esclusi: "+r.data.totals.ko+".",false);
-        }
+        if(!silent) showMsg(r.data.value+" contratti da inizio mese · RID: "+r.data.rid+" ("+r.data.ridPct+"%)",false);
       })
       .catch(function(err){
         if(!silent) showMsg("Impossibile contattare Supermoney: "+err.message,true);
