@@ -148,8 +148,9 @@ exports.handler = async function (event) {
   }
   const todayIt = isoDate(nowIt);
   const ystIt = isoDate(new Date(nowIt.getFullYear(), nowIt.getMonth(), nowIt.getDate() - 1));
-  // Prima delle 18:00 ora italiana usa ieri (dati più consolidati)
-  const refDay = nowIt.getHours() < 18 ? ystIt : todayIt;
+  // Prima delle 18:00 usa ieri (dati più consolidati), MA se ieri è in un mese diverso usa oggi
+  // (es. 1 settembre ore 10:00 → usa oggi, non il 31 agosto)
+  const refDay = (nowIt.getHours() < 18 && ystIt.slice(0, 7) === todayIt.slice(0, 7)) ? ystIt : todayIt;
 
   const defaultFrom = refDay.slice(0, 7) + "-01"; // primo del mese di refDay
   // Se viene passata una singola "date", usala per entrambi (backward compat)
