@@ -1448,10 +1448,10 @@ function renderMonthlyHistory(unit){
     var fornitori=Object.keys(data.byFornitore).sort(function(a,b){ return data.byFornitore[b].total-data.byFornitore[a].total; });
     if(fornitori.length){
       html+='<span class="sync-section-label">Per gestore</span>';
-      html+='<table class="sync-tbl"><thead><tr><th>Gestore</th><th class="r">Contratti</th><th class="r">RID</th><th class="r">% RID</th></tr></thead><tbody>';
+      html+='<table class="sync-tbl"><thead><tr><th>Gestore</th><th class="r">Contratti</th><th class="r">% Tot</th><th class="r">RID</th><th class="r">% RID</th></tr></thead><tbody>';
       fornitori.forEach(function(f){
         var r=data.byFornitore[f];
-        html+='<tr><td>'+escapeHtml(f)+'</td><td class="n r">'+r.total+'</td><td class="n r">'+r.rid+'</td><td class="n r">'+pct(r.rid,r.total)+'</td></tr>';
+        html+='<tr><td>'+escapeHtml(f)+'</td><td class="n r">'+r.total+'</td><td class="n r">'+pct(r.total,data.value)+'</td><td class="n r">'+r.rid+'</td><td class="n r">'+pct(r.rid,r.total)+'</td></tr>';
       });
       html+='</tbody></table>';
     }
