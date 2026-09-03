@@ -232,19 +232,19 @@ exports.handler = async function(event) {
     catch (e) { console.error("PUN:", e.message); }
 
     // PSV (gas naturale, €/smc)
-    let psv = [], psvSource = null;
+    let psv = [], psvSource = null, psvError = null;
     if (process.env.GME_LOGIN && process.env.GME_PASSWORD) {
       try {
         const token = await gmeLogin();
         const r = await fetchPSV(token, toYMDInt(start), toYMDInt(now));
         psv = r.monthly; psvSource = r.source;
-      } catch (e) { console.error("PSV:", e.message); }
-    }
+      } catch (e) { psvError = e.message; console.error("PSV:", e.message); }
+    } else { psvError = "GME_LOGIN/GME_PASSWORD env vars missing"; }
 
     return {
       statusCode: 200,
       headers: HEADERS,
-      body: JSON.stringify({ cachedAt: now.toISOString(), pun, psv, psvSource }),
+      body: JSON.stringify({ cachedAt: now.toISOString(), pun, psv, psvSource, psvError }),
     };
   } catch (err) {
     return { statusCode: 502, headers: HEADERS, body: JSON.stringify({ error: err.message }) };
