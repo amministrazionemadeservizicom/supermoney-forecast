@@ -182,9 +182,11 @@ async function fetchPSV(token, intervalStart, intervalEnd) {
         { ...GME_HEADERS, Authorization: `Bearer ${token}` },
         JSON.stringify({ Platform: "PublicMarketResults", Segment: "MGP-GAS", DataName: dataName, IntervalStart: intervalStart, IntervalEnd: intervalEnd })
       );
-      debugSteps.push(`${dataName} http=${res.status}`);
+      const resText = await res.text();
+      debugSteps.push(`${dataName} http=${res.status} body=${resText.slice(0,100)}`);
       if (res.status !== 200) continue;
-      const data = JSON.parse(await res.text());
+      const __already = resText;
+      const data = JSON.parse(__already);
       debugSteps.push(`${dataName} contentResponse=${!!data.contentResponse}`);
       if (!data.contentResponse) continue;
       const content = await decodeZipToCSV(data.contentResponse);
