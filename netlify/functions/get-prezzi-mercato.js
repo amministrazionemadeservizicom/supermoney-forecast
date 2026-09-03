@@ -22,10 +22,16 @@ function toYMDInt(d) {
 }
 
 // ---- GME auth ----
+const GME_HEADERS = {
+  "Content-Type": "application/json",
+  "User-Agent": "Mozilla/5.0",
+  "Accept": "application/json",
+};
+
 async function gmeLogin() {
   const res = await fetch(`${GME_BASE}/api/v1/Auth`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: GME_HEADERS,
     body: JSON.stringify({
       Login: process.env.GME_LOGIN,
       Password: process.env.GME_PASSWORD,
@@ -155,7 +161,7 @@ async function fetchPSV(token, intervalStart, intervalEnd) {
     try {
       const res = await fetch(`${GME_BASE}/api/v1/RequestData`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { ...GME_HEADERS, Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           Platform: "PublicMarketResults",
           Segment: "MGP-GAS",
