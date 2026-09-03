@@ -606,7 +606,8 @@
   var PSV_STORICO = {
     "2025-09": 0.360, "2025-10": 0.350, "2025-11": 0.370, "2025-12": 0.390,
     "2026-01": 0.420, "2026-02": 0.400, "2026-03": 0.390, "2026-04": 0.370,
-    "2026-05": 0.350, "2026-06": 0.360, "2026-07": 0.370, "2026-08": 0.380
+    "2026-05": 0.350, "2026-06": 0.360, "2026-07": 0.370, "2026-08": 0.616,
+    "2026-09": 0.616 // stima da agosto GME; verrà sovrascritta dall'API
   };
 
   // PUN mensile storico (fonte: GME via Abbassalebollette.it, sett 2025 - ago 2026)
@@ -1399,11 +1400,13 @@ function renderMonthlyHistory(unit){
       punEl.value=Math.round(punCurr.avg*100000)/100000;
       if(!state.currentMonth) state.currentMonth={};
       state.currentMonth.pun=parseFloat(punEl.value);
+      saveState(state);
     }
     if(psvCurr&&psvCurr.avg){
       psvEl.value=Math.round(psvCurr.avg*10000)/10000;
       if(!state.currentMonth) state.currentMonth={};
       state.currentMonth.psv=parseFloat(psvEl.value);
+      saveState(state);
     }
 
     // Aggiorna PUN storico nei mesi già salvati
