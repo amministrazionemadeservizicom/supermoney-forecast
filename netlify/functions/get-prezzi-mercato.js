@@ -183,7 +183,7 @@ async function fetchPSV(token, intervalStart, intervalEnd) {
 
 // ---- PUN da energy-charts.info (no auth) ----
 async function fetchPUN(isoStart, isoEnd) {
-  const url = `${ENERGY_CHARTS}/price?bzn=IT%20North&start=${isoStart}&end=${isoEnd}`;
+  const url = `${ENERGY_CHARTS}/price?bzn=IT-North&start=${isoStart}&end=${isoEnd}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Energy Charts fallito (${res.status})`);
   const data = await res.json();
