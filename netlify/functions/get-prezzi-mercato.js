@@ -174,7 +174,6 @@ function gctJsonToMonthly(jsonText) {
 
 // ---- PSV da GME ----
 async function fetchPSV(token, intervalStart, intervalEnd) {
-  const debugSteps = [];
   for (const dataName of ["GAS_ContinuousTrading", "GAS_PGasResults"]) {
     try {
       const res = await httpsPost(
@@ -182,15 +181,10 @@ async function fetchPSV(token, intervalStart, intervalEnd) {
         { ...GME_HEADERS, Authorization: `Bearer ${token}` },
         JSON.stringify({ Platform: "PublicMarketResults", Segment: "MGP-GAS", DataName: dataName, IntervalStart: intervalStart, IntervalEnd: intervalEnd })
       );
-      const resText = await res.text();
-      debugSteps.push(`${dataName} http=${res.status} body=${resText.slice(0,100)}`);
       if (res.status !== 200) continue;
-      const __already = resText;
-      const data = JSON.parse(__already);
-      debugSteps.push(`${dataName} contentResponse=${!!data.contentResponse}`);
+      const data = JSON.parse(await res.text());
       if (!data.contentResponse) continue;
       const content = await decodeZipToCSV(data.contentResponse);
-      debugSteps.push(`${dataName} contentLen=${content.length}`);
 
       // GAS_ContinuousTrading restituisce JSON; GAS_PGasResults restituisce CSV
       let monthly;
@@ -199,11 +193,10 @@ async function fetchPSV(token, intervalStart, intervalEnd) {
       } else {
         monthly = csvToMonthly(content, PSV_MWH_TO_SMC);
       }
-      debugSteps.push(`${dataName} monthly=${monthly.length}`);
-      if (monthly.length > 0) return { monthly, source: dataName, debug: debugSteps };
-    } catch (e) { debugSteps.push(`${dataName} ERR=${e.message}`); console.error(`PSV ${dataName}:`, e.message); continue; }
+      if (monthly.length > 0) return { monthly, source: dataName };
+    } catch (e) { console.error(`PSV ${dataName}:`, e.message); continue; }
   }
-  return { monthly: [], source: null, debug: debugSteps };
+  return { monthly: [], source: null };
 }
 
 // ---- PUN da energy-charts.info (no auth) ----
@@ -247,7 +240,8 @@ exports.handler = async function(event) {
 
   try {
     const now    = new Date();
-    const start  = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+    // GME limite: max ~180 giorni per request → usiamo 6 mesi
+    const start  = new Date(now.getFullYear(), now.getMonth() - 6, 1);
     const isoStart = start.toISOString().slice(0, 10);
     const isoEnd   = now.toISOString().slice(0, 10);
 
@@ -257,19 +251,19 @@ exports.handler = async function(event) {
     catch (e) { console.error("PUN:", e.message); }
 
     // PSV (gas naturale, €/smc)
-    let psv = [], psvSource = null, psvError = null;
+    let psv = [], psvSource = null;
     if (process.env.GME_LOGIN && process.env.GME_PASSWORD) {
       try {
         const token = await gmeLogin();
         const r = await fetchPSV(token, toYMDInt(start), toYMDInt(now));
-        psv = r.monthly; psvSource = r.source; psvError = r.debug;
-      } catch (e) { psvError = e.message; console.error("PSV:", e.message); }
-    } else { psvError = "GME_LOGIN/GME_PASSWORD env vars missing"; }
+        psv = r.monthly; psvSource = r.source;
+      } catch (e) { console.error("PSV:", e.message); }
+    }
 
     return {
       statusCode: 200,
       headers: HEADERS,
-      body: JSON.stringify({ cachedAt: now.toISOString(), pun, psv, psvSource, psvError }),
+      body: JSON.stringify({ cachedAt: now.toISOString(), pun, psv, psvSource }),
     };
   } catch (err) {
     return { statusCode: 502, headers: HEADERS, body: JSON.stringify({ error: err.message }) };
