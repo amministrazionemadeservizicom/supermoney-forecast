@@ -1168,35 +1168,32 @@ function renderMonthlyHistory(unit){
     var offGasEl=document.getElementById("offerta-gas-input");
     var rspEl=document.getElementById("market-risparmio");
     var ym=currentMonthPrefix();
-    // Pre-popola da currentMonth o dalla tabella statica PUN
+    // Assicura che currentMonth esista (anche senza sync) per la 5a proiezione
+    if(!state.currentMonth) state.currentMonth={};
+
+    // PSV_STORICO e PUN_STORICO hanno sempre la precedenza su valori vecchi in localStorage
+    // (es. PSV 0.38 salvato quando GME era rotto → sovrascriviamo con il valore corretto)
+    var psvStorico=PSV_STORICO[ym]||(function(){ var k=Object.keys(PSV_STORICO).sort(); return PSV_STORICO[k[k.length-1]]; })();
+    var punStorico=PUN_STORICO[ym]||(function(){ var k=Object.keys(PUN_STORICO).sort(); return PUN_STORICO[k[k.length-1]]; })();
+
+    if(psvStorico && (!state.currentMonth.psv || state.currentMonth.psv < psvStorico * 0.7)){
+      // Il valore in cache è inferiore al 70% del valore noto: è chiaramente stale, forza aggiornamento
+      state.currentMonth.psv=psvStorico; saveState(state);
+    }
+
+    // Pre-popola da currentMonth (già aggiornato sopra se stale)
     if(state.currentMonth){
       if(state.currentMonth.pun) punEl.value=state.currentMonth.pun;
       if(state.currentMonth.prezzoOfferta) offEl.value=state.currentMonth.prezzoOfferta;
       if(state.currentMonth.psv) psvEl.value=state.currentMonth.psv;
       if(state.currentMonth.prezzoOffertaGas) offGasEl.value=state.currentMonth.prezzoOffertaGas;
     }
-    // Assicura che currentMonth esista (anche senza sync) per la 5a proiezione
-    if(!state.currentMonth) state.currentMonth={};
 
     if(!punEl.value){
-      // Usa PUN del mese corrente o, se non disponibile, l'ultimo noto
-      var punVal=PUN_STORICO[ym];
-      if(!punVal){
-        var keys=Object.keys(PUN_STORICO).sort();
-        punVal=PUN_STORICO[keys[keys.length-1]]; // ultimo disponibile
-      }
-      if(punVal) punEl.value=punVal;
-      if(punVal && !state.currentMonth.pun){ state.currentMonth.pun=parseFloat(punVal); saveState(state); }
+      if(punStorico){ punEl.value=punStorico; state.currentMonth.pun=parseFloat(punStorico); saveState(state); }
     }
     if(!psvEl.value){
-      // Usa PSV del mese corrente o, se non disponibile, l'ultimo noto
-      var psvVal=PSV_STORICO[ym];
-      if(!psvVal){
-        var psvKeys=Object.keys(PSV_STORICO).sort();
-        psvVal=PSV_STORICO[psvKeys[psvKeys.length-1]]; // ultimo disponibile
-      }
-      if(psvVal) psvEl.value=psvVal;
-      if(psvVal && !state.currentMonth.psv){ state.currentMonth.psv=parseFloat(psvVal); saveState(state); }
+      if(psvStorico){ psvEl.value=psvStorico; state.currentMonth.psv=parseFloat(psvStorico); saveState(state); }
     }
     if(!offEl.value) offEl.value=OFFERTA_DEFAULTS.luce;
     if(!offGasEl.value) offGasEl.value=OFFERTA_DEFAULTS.gas;
