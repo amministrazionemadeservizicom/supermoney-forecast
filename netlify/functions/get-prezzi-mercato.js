@@ -150,6 +150,7 @@ function gctJsonToMonthly(jsonText) {
 
 // ---- PSV da GME ----
 async function fetchPSV(token, intervalStart, intervalEnd) {
+  const debugSteps = [];
   for (const dataName of ["GAS_ContinuousTrading", "GAS_PGasResults"]) {
     try {
       const res = await fetch(`${GME_BASE}/api/v1/RequestData`, {
@@ -163,10 +164,13 @@ async function fetchPSV(token, intervalStart, intervalEnd) {
           IntervalEnd: intervalEnd,
         }),
       });
+      debugSteps.push(`${dataName} http=${res.status}`);
       if (!res.ok) continue;
       const data = await res.json();
+      debugSteps.push(`${dataName} contentResponse=${!!data.contentResponse}`);
       if (!data.contentResponse) continue;
       const content = await decodeZipToCSV(data.contentResponse);
+      debugSteps.push(`${dataName} contentLen=${content.length}`);
 
       // GAS_ContinuousTrading restituisce JSON; GAS_PGasResults restituisce CSV
       let monthly;
@@ -175,10 +179,11 @@ async function fetchPSV(token, intervalStart, intervalEnd) {
       } else {
         monthly = csvToMonthly(content, PSV_MWH_TO_SMC);
       }
-      if (monthly.length > 0) return { monthly, source: dataName };
-    } catch (e) { console.error(`PSV ${dataName}:`, e.message); continue; }
+      debugSteps.push(`${dataName} monthly=${monthly.length}`);
+      if (monthly.length > 0) return { monthly, source: dataName, debug: debugSteps };
+    } catch (e) { debugSteps.push(`${dataName} ERR=${e.message}`); console.error(`PSV ${dataName}:`, e.message); continue; }
   }
-  return { monthly: [], source: null };
+  return { monthly: [], source: null, debug: debugSteps };
 }
 
 // ---- PUN da energy-charts.info (no auth) ----
@@ -237,7 +242,7 @@ exports.handler = async function(event) {
       try {
         const token = await gmeLogin();
         const r = await fetchPSV(token, toYMDInt(start), toYMDInt(now));
-        psv = r.monthly; psvSource = r.source;
+        psv = r.monthly; psvSource = r.source; psvError = r.debug;
       } catch (e) { psvError = e.message; console.error("PSV:", e.message); }
     } else { psvError = "GME_LOGIN/GME_PASSWORD env vars missing"; }
 
