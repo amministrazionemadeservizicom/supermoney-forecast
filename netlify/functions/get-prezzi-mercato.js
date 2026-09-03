@@ -2,7 +2,28 @@
 
 const { inflateRaw } = require("zlib");
 const { promisify } = require("util");
+const https = require("https");
 const inflateRawAsync = promisify(inflateRaw);
+
+// Wrapper https per bypassare i quirk di native fetch con certi server
+function httpsPost(url, headers, body) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const bodyBuf = Buffer.from(body, "utf8");
+    const req = https.request({
+      hostname: u.hostname, port: 443, path: u.pathname + u.search,
+      method: "POST",
+      headers: { ...headers, "Content-Length": bodyBuf.length },
+    }, res => {
+      const chunks = [];
+      res.on("data", c => chunks.push(c));
+      res.on("end", () => resolve({ status: res.statusCode, text: () => Promise.resolve(Buffer.concat(chunks).toString("utf8")) }));
+    });
+    req.on("error", reject);
+    req.write(bodyBuf);
+    req.end();
+  });
+}
 
 const GME_BASE = "https://api.mercatoelettrico.org/request";
 const ENERGY_CHARTS = "https://api.energy-charts.info";
@@ -29,16 +50,13 @@ const GME_HEADERS = {
 };
 
 async function gmeLogin() {
-  const res = await fetch(`${GME_BASE}/api/v1/Auth`, {
-    method: "POST",
-    headers: GME_HEADERS,
-    body: JSON.stringify({
-      Login: process.env.GME_LOGIN,
-      Password: process.env.GME_PASSWORD,
-    }),
-  });
-  if (!res.ok) throw new Error(`GME Auth fallito (${res.status})`);
-  const data = await res.json();
+  const res = await httpsPost(
+    `${GME_BASE}/api/v1/Auth`,
+    GME_HEADERS,
+    JSON.stringify({ Login: process.env.GME_LOGIN, Password: process.env.GME_PASSWORD })
+  );
+  if (res.status !== 200) throw new Error(`GME Auth fallito (${res.status})`);
+  const data = JSON.parse(await res.text());
   if (!data.token) throw new Error("Nessun token GME");
   return data.token;
 }
@@ -159,20 +177,14 @@ async function fetchPSV(token, intervalStart, intervalEnd) {
   const debugSteps = [];
   for (const dataName of ["GAS_ContinuousTrading", "GAS_PGasResults"]) {
     try {
-      const res = await fetch(`${GME_BASE}/api/v1/RequestData`, {
-        method: "POST",
-        headers: { ...GME_HEADERS, Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          Platform: "PublicMarketResults",
-          Segment: "MGP-GAS",
-          DataName: dataName,
-          IntervalStart: intervalStart,
-          IntervalEnd: intervalEnd,
-        }),
-      });
+      const res = await httpsPost(
+        `${GME_BASE}/api/v1/RequestData`,
+        { ...GME_HEADERS, Authorization: `Bearer ${token}` },
+        JSON.stringify({ Platform: "PublicMarketResults", Segment: "MGP-GAS", DataName: dataName, IntervalStart: intervalStart, IntervalEnd: intervalEnd })
+      );
       debugSteps.push(`${dataName} http=${res.status}`);
-      if (!res.ok) continue;
-      const data = await res.json();
+      if (res.status !== 200) continue;
+      const data = JSON.parse(await res.text());
       debugSteps.push(`${dataName} contentResponse=${!!data.contentResponse}`);
       if (!data.contentResponse) continue;
       const content = await decodeZipToCSV(data.contentResponse);
