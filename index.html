@@ -748,6 +748,19 @@
     for(var d=1;d<=today.getDate();d++){ var dow=new Date(y,m,d).getDay(); if(dow!==0&&dow!==6) count++; }
     return count;
   }
+  // Giorni lavorativi "effettivi": oggi pesa proporzionalmente all'ora
+  // Ore lavorative 8:00–20:00; prima delle 8 oggi vale 0, dopo le 20 vale 1
+  function effectiveWorkdaysSoFar(){
+    var nowIt=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Rome"}));
+    var dow=nowIt.getDay();
+    var todayIsWorkday=(dow!==0&&dow!==6);
+    var completed=workdaysSoFar()-(todayIsWorkday?1:0); // giorni completati prima di oggi
+    if(!todayIsWorkday) return completed;
+    var h=nowIt.getHours()+nowIt.getMinutes()/60;
+    var START=8,END=20;
+    var frac=h<=START?0:h>=END?1:(h-START)/(END-START);
+    return completed+frac;
+  }
 
   // Mesi passati (completi) da storico Supermoney
   function pastMonthlyTotals(){
@@ -853,7 +866,7 @@
     }
 
     var soFar    = cm.total;
-    var wdSoFar  = cm.workdaysSoFar || workdaysSoFar();
+    var wdSoFar  = effectiveWorkdaysSoFar(); // pesa oggi in base all'ora (8-20)
     var dailyRate = wdSoFar > 0 ? soFar / wdSoFar : 0;
 
     ctx.textContent = fmtNum(soFar,0)+" "+unit+" da inizio mese · tasso: "+fmtNum(dailyRate,1)+" "+unit+"/giorno lavorativo · "+remaining+" giorni lavorativi rimanenti";
@@ -1114,7 +1127,7 @@ function renderMonthlyHistory(unit){
     if(!cm || !cm.byFornitore || !Object.keys(cm.byFornitore).length){ section.style.display="none"; return; }
     section.style.display="";
     var remaining=workdaysRemaining();
-    var wdSoFar=cm.workdaysSoFar||workdaysSoFar();
+    var wdSoFar=effectiveWorkdaysSoFar();
     var fm=totalFactorMultiplier();
     function projRow(soFarF){
       var rate=wdSoFar>0?soFarF/wdSoFar:0;
